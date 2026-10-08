@@ -31,6 +31,7 @@ import {
   STATUS_OPTIONS,
   STORE_CLOUD_ID,
   STORE_CONFIG,
+  STORE_REPO_CONFIG_PREFIX,
   TICKET_RE,
   TIER,
   USAGE_REFRESH_MS,
@@ -101,7 +102,23 @@ async function patchReview($: EngineInterface, patch: Partial<ReviewChoice>): Pr
 async function saveConfig($: EngineInterface, patch: Partial<DevflowConfig>): Promise<void> {
   const next = { ...(await getConfig($)), ...patch }
   await setConfig($, next)
-  await $.store.set(STORE_CONFIG, next)
+  const { user, repo } = fmt.splitConfig(next)
+  const global = (await $.store.get(STORE_CONFIG)) as Partial<DevflowConfig> | undefined
+  await $.store.set(STORE_CONFIG, { ...global, ...user })
+  await $.store.set(await repoConfigKey($), repo)
+}
+
+// Keyed by repo root so subdirectory sessions share it; cwd outside a git repo.
+async function repoConfigKey($: EngineInterface): Promise<string> {
+  const root = await git($, ['rev-parse', '--show-toplevel'])
+  return STORE_REPO_CONFIG_PREFIX + (root.isOk ? root.text : await $.session.cwd())
+}
+
+async function loadConfig($: EngineInterface): Promise<DevflowConfig> {
+  const repo = (await $.store.get(await repoConfigKey($))) as Partial<DevflowConfig> | undefined
+  const global = (await $.store.get(STORE_CONFIG)) as Partial<DevflowConfig> | undefined
+  const { user } = fmt.splitConfig(global ?? {})
+  return { ...DEFAULT_CONFIG, ...(repo ? fmt.splitConfig(repo).repo : global), ...user }
 }
 
 async function refreshUsage($: EngineInterface): Promise<void> {
@@ -582,8 +599,7 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    const stored = (await $.store.get(STORE_CONFIG)) as Partial<DevflowConfig> | undefined
-    await setConfig($, { ...DEFAULT_CONFIG, ...stored })
+    await setConfig($, await loadConfig($))
     await $.command.register({ name: COMMAND, description: 'Open the Jira Devflow panel' })
     $.clock.every(USAGE_REFRESH_MS, () => void refreshUsage($))
     void refreshUsage($)

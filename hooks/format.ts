@@ -2,7 +2,7 @@
 import type { SessionUsage } from 'claude-code'
 
 import type { DevflowConfig, Meter, UsageSnapshot } from '../types'
-import { DANGER_PERCENT, MAX_DIFF_CHARS, PLUGIN, WARN_PERCENT } from './constants'
+import { DANGER_PERCENT, GLOBAL_CONFIG_FIELDS, MAX_DIFF_CHARS, PLUGIN, WARN_PERCENT } from './constants'
 
 const UUID_RE = /"(?:id|cloudId)"\s*:\s*"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/i
 const GIT_RULES_RE = /##\s*Git Commits?[^\n]*\n([\s\S]*?)(?=\n##\s|$)/i
@@ -10,6 +10,16 @@ const GIT_RULES_RE = /##\s*Git Commits?[^\n]*\n([\s\S]*?)(?=\n##\s|$)/i
 const round = (n: number) => Math.round(n * 10) / 10
 
 export const toOptions = (values: readonly string[]) => values.map(value => ({ value }))
+
+export function splitConfig(config: Partial<DevflowConfig>) {
+  const user: Partial<DevflowConfig> = {}
+  const repo: Partial<DevflowConfig> = { ...config }
+  for (const field of GLOBAL_CONFIG_FIELDS) {
+    if (field in repo) Object.assign(user, { [field]: repo[field] })
+    delete repo[field]
+  }
+  return { user, repo }
+}
 
 export function parseCloudId(text: string): string | undefined {
   return UUID_RE.exec(text)?.[1]

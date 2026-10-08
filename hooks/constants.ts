@@ -24,7 +24,10 @@ export const MAX_DIFF_CHARS = 12_000
 export const GIT_TIMEOUT_MS = 30_000
 export const PUSH_TIMEOUT_MS = 120_000
 
+// Global key holds user-wide fields; its repo fields (pre per-repo config) seed new repos.
 export const STORE_CONFIG = 'config'
+export const STORE_REPO_CONFIG_PREFIX = 'config:'
+export const GLOBAL_CONFIG_FIELDS = ['email', 'onDemandBudgetUsd'] as const
 export const STORE_CLOUD_ID = 'cloudId'
 
 export const DEFAULT_CONFIG: DevflowConfig = {

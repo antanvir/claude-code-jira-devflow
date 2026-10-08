@@ -44,12 +44,14 @@ Not published yet. To load it from this folder while developing:
   { "env": { "CLAUDE_CODE_PLUGIN_DIRS": "C:\\path\\to\\claude-code-jira-devflow" } }
   ```
 
-Once published, install it with:
+Once published, install it from a terminal (the `/plugin` slash command is unavailable in VSCode / Desktop):
 
 ```
-/plugin marketplace add antanvir/claude-code-jira-devflow
-/plugin install claude-code-jira-devflow@devflow
+claude plugin marketplace add antanvir/claude-code-jira-devflow
+claude plugin install claude-code-jira-devflow@devflow
 ```
+
+Update later with `claude plugin marketplace update devflow`, then start a new session.
 
 ## Development
 

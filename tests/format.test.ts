@@ -3,6 +3,13 @@ import { expect, test } from 'claude-code/testing'
 import { DEFAULT_CONFIG } from '../hooks/constants'
 import * as fmt from '../hooks/format'
 
+test('email and budget are user-wide, the rest is per repo', async () => {
+  const { user, repo } = fmt.splitConfig({ ...DEFAULT_CONFIG, email: 'a@b.c', labels: ['x'] })
+  expect(user).toEqual({ email: 'a@b.c', onDemandBudgetUsd: DEFAULT_CONFIG.onDemandBudgetUsd })
+  expect(repo.labels).toEqual(['x'])
+  expect('email' in repo).toBe(false)
+})
+
 test('usage bars switch colour at 60% and 85%', async () => {
   expect(fmt.levelColor(42)).toBe('success')
   expect(fmt.levelColor(60)).toBe('warning')
