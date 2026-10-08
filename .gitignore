@@ -1,0 +1,25 @@
+# Private planning docs
+docs/private/
+
+# Types the Claude Code engine generates into the mod folder
+.claude-plugin/types/
+
+# Local Claude Code settings
+.claude/settings.local.json
+
+# Dependencies and build output
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Logs and env
+*.log
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
