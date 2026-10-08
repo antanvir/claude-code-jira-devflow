@@ -47,7 +47,8 @@ Not published yet. To load it from this folder while developing:
 Once published, install it with:
 
 ```
-/plugin install claude-code-jira-devflow --marketplace antanvir/claude-code-jira-devflow
+/plugin marketplace add antanvir/claude-code-jira-devflow
+/plugin install claude-code-jira-devflow@devflow
 ```
 
 ## Development
