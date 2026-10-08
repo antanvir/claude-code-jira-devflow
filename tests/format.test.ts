@@ -74,6 +74,6 @@ test('update prompt includes only the enabled parts', async () => {
 })
 
 test('prompts use the bundled, plugin-namespaced skills', async () => {
-  expect(fmt.updateTicketPrompt('PROJ-1', DEFAULT_CONFIG).includes('claude-code-jira-devflow:update-jira-ticket skill')).toBe(true)
-  expect(fmt.writeAcPrompt('PROJ-1').includes('claude-code-jira-devflow:write-acceptance-criteria skill')).toBe(true)
+  expect(fmt.updateTicketPrompt('PROJ-1', DEFAULT_CONFIG).includes('jira-devflow:update-jira-ticket skill')).toBe(true)
+  expect(fmt.writeAcPrompt('PROJ-1').includes('jira-devflow:write-acceptance-criteria skill')).toBe(true)
 })

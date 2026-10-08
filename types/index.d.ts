@@ -40,7 +40,7 @@ export type PaneView = 'main' | 'setup' | 'settings' | 'update'
 
 declare module 'claude-code' {
   interface PluginState {
-    'claude-code-jira-devflow': {
+    'jira-devflow': {
       ticket: string | null
       config: DevflowConfig
       usage: UsageSnapshot
@@ -51,6 +51,8 @@ declare module 'claude-code' {
       view: PaneView
       notice: string | null
       baseline: TurnBaseline | null
+      // True when no attached surface placed the pane (e.g. VS Code): draw the band.
+      band: boolean
     }
   }
 }

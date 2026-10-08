@@ -2,5 +2,5 @@
   "name": "devflow",
   "owner": { "name": "A. N. Tanvir" },
   "description": "Jira + git devflow mod for Claude Code",
-  "plugins": [{ "name": "claude-code-jira-devflow", "source": "./" }]
+  "plugins": [{ "name": "jira-devflow", "source": "./" }]
 }

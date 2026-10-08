@@ -1,4 +1,4 @@
-# claude-code-jira-devflow
+# jira-devflow
 
 A Claude Code mod that adds Jira and git actions to Claude Code, so a ticket can go from analysis to plan, commit and review without leaving the chat.
 
@@ -18,7 +18,7 @@ Everything lives in one **Jira Devflow** panel. It opens when a session starts, 
 - **AI Review:** after a commit or push, asks Claude to start a review agent on `git diff <base>...HEAD` with the model and effort you choose.
 - **Usage:** 5-hour, weekly, on-demand and context meters, colour-coded (green below 60%, amber 60–85%, red 85%+), with a **Compact** button.
 
-Both Jira skills ship in [skills/](skills/) and are invoked as `claude-code-jira-devflow:<skill>`, so no personal skills are needed and any same-named skills of your own are left alone.
+Both Jira skills ship in [skills/](skills/) and are invoked as `jira-devflow:<skill>`, so no personal skills are needed and any same-named skills of your own are left alone.
 
 ## Requirements
 
@@ -48,7 +48,7 @@ Once published, install it from a terminal (the `/plugin` slash command is unava
 
 ```
 claude plugin marketplace add antanvir/claude-code-jira-devflow
-claude plugin install claude-code-jira-devflow@devflow
+claude plugin install jira-devflow@devflow
 ```
 
 Update later with `claude plugin marketplace update devflow`, then start a new session.

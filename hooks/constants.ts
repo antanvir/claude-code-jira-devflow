@@ -1,6 +1,6 @@
 import type { DevflowConfig } from '../types'
 
-export const PLUGIN = 'claude-code-jira-devflow'
+export const PLUGIN = 'jira-devflow'
 export const PANE_ID = 'devflow'
 export const PANE_TITLE = 'Jira Devflow'
 export const COMMAND = 'devflow'

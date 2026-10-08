@@ -1,4 +1,4 @@
-// claude-code-jira-devflow: every function that touches `$` lives in this file,
+// jira-devflow: every function that touches `$` lives in this file,
 // because the engine follows `$` only into functions declared in the same file.
 import type { EngineInterface, Register, RenderElement, RenderInput } from 'claude-code'
 
@@ -49,16 +49,17 @@ const IDLE_COMMIT: CommitCard = { files: [], message: '', phase: 'idle' }
 // One literal ref + accessor pair per key: `claude plugin validate` must see each
 // `plugin`/`key` literal at its $.state call, so refs are never passed around.
 
-const TICKET = { plugin: 'claude-code-jira-devflow', key: 'ticket' } as const
-const CONFIG = { plugin: 'claude-code-jira-devflow', key: 'config' } as const
-const USAGE = { plugin: 'claude-code-jira-devflow', key: 'usage' } as const
-const COMMIT = { plugin: 'claude-code-jira-devflow', key: 'commit' } as const
-const FINDINGS = { plugin: 'claude-code-jira-devflow', key: 'findings' } as const
-const PLAN = { plugin: 'claude-code-jira-devflow', key: 'plan' } as const
-const REVIEW = { plugin: 'claude-code-jira-devflow', key: 'review' } as const
-const VIEW = { plugin: 'claude-code-jira-devflow', key: 'view' } as const
-const NOTICE = { plugin: 'claude-code-jira-devflow', key: 'notice' } as const
-const BASELINE = { plugin: 'claude-code-jira-devflow', key: 'baseline' } as const
+const TICKET = { plugin: 'jira-devflow', key: 'ticket' } as const
+const CONFIG = { plugin: 'jira-devflow', key: 'config' } as const
+const USAGE = { plugin: 'jira-devflow', key: 'usage' } as const
+const COMMIT = { plugin: 'jira-devflow', key: 'commit' } as const
+const FINDINGS = { plugin: 'jira-devflow', key: 'findings' } as const
+const PLAN = { plugin: 'jira-devflow', key: 'plan' } as const
+const REVIEW = { plugin: 'jira-devflow', key: 'review' } as const
+const VIEW = { plugin: 'jira-devflow', key: 'view' } as const
+const NOTICE = { plugin: 'jira-devflow', key: 'notice' } as const
+const BASELINE = { plugin: 'jira-devflow', key: 'baseline' } as const
+const BAND = { plugin: 'jira-devflow', key: 'band' } as const
 
 const getTicket = async ($: EngineInterface) => (await $.state.get(TICKET)).value ?? null
 const setTicket = ($: EngineInterface, value: string | null) => $.state.set(TICKET, value)
@@ -78,6 +79,7 @@ const getView = async ($: EngineInterface) => (await $.state.get(VIEW)).value ??
 const getNotice = async ($: EngineInterface) => (await $.state.get(NOTICE)).value ?? null
 const getBaseline = async ($: EngineInterface) => (await $.state.get(BASELINE)).value ?? null
 const setBaseline = ($: EngineInterface, value: TurnBaseline | null) => $.state.set(BASELINE, value)
+const getBand = async ($: EngineInterface) => (await $.state.get(BAND)).value ?? false
 
 async function notify($: EngineInterface, text: string | null): Promise<void> {
   await $.state.set(NOTICE, text)
@@ -85,6 +87,13 @@ async function notify($: EngineInterface, text: string | null): Promise<void> {
 
 async function show($: EngineInterface, view: PaneView): Promise<void> {
   await $.state.set(VIEW, view)
+}
+
+// Surfaces that place no panes (VS Code) answer isPlaced: false; the band stands in.
+async function openPane($: EngineInterface): Promise<boolean> {
+  const opened = await $.ui.open({ id: PANE_ID, title: PANE_TITLE })
+  await $.state.set(BAND, !opened.isPlaced)
+  return opened.isPlaced
 }
 
 async function patchCommit($: EngineInterface, patch: Partial<CommitCard>): Promise<void> {
@@ -595,6 +604,82 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
   )
 }
 
+// --- band (surfaces without panes) -----------------------------------------
+// Rows top to bottom: active card, ticket actions, meters (closest to the prompt).
+
+async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Promise<RenderElement> {
+  const ticket = await getTicket($)
+  const usage = await getUsage($)
+  const commit = await getCommit($)
+  const findings = await getFindings($)
+  const notice = await getNotice($)
+  const { Box, Text, Button } = $.ui.resolve(e)
+
+  const action = (key: string, label: string, isPrimary: boolean, onPress: () => Promise<unknown>) => (
+    <Button key={key} label={label} variant={isPrimary ? 'primary' : 'secondary'} onPress={() => void onPress()} />
+  )
+  const meter = (name: string, m?: Meter) => (
+    <Text key={`meter-${name}`} color={m ? fmt.levelColor(m.percent) : undefined} dimColor={!m}>
+      {`${name} ${m ? m.label : 'n/a'}`}
+    </Text>
+  )
+
+  const isAfterCommit = commit.phase === 'pushed' || commit.phase === 'committed'
+  let activeRow: RenderElement | null = null
+  if (commit.phase === 'ready') {
+    activeRow = (
+      <Box key="band-commit" flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
+        <Text bold>{`Commit ${commit.files.length} file${commit.files.length === 1 ? '' : 's'}:`}</Text>
+        <Text dimColor wrap="truncate-end">{commit.message.split('\n')[0] || '…'}</Text>
+        {action('band-commit-go', 'Commit', true, () => runGit($, 'commit'))}
+        {action('band-push', 'Commit & Push', false, () => runGit($, 'push'))}
+        {action('band-commit-x', 'Dismiss', false, () => setCommit($, IDLE_COMMIT))}
+      </Box>
+    )
+  } else if (isAfterCommit) {
+    activeRow = (
+      <Box key="band-review" flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
+        <Text dimColor>{commit.note ?? (commit.phase === 'pushed' ? 'Pushed' : 'Committed')}</Text>
+        {action('band-review-go', 'AI Review', true, () => startReview($))}
+        {action('band-review-x', 'Done', false, () => setCommit($, IDLE_COMMIT))}
+      </Box>
+    )
+  } else if (findings && !findings.isShared) {
+    activeRow = (
+      <Box key="band-findings" flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
+        <Text>{`Findings for ${findings.ticket} ready`}</Text>
+        {action('band-share', 'Share in Jira', true, () => shareFindings($))}
+        {action('band-findings-x', 'Dismiss', false, () => setFindings($, null))}
+      </Box>
+    )
+  }
+
+  return (
+    <Box flexDirection="column" width="100%">
+      {notice ? (
+        <Box key="band-notice" flexDirection="row" gap={1}>
+          <Text color="suggestion">{notice}</Text>
+          <Button key="band-notice-x" label="×" plain onPress={() => void notify($, null)} />
+        </Box>
+      ) : null}
+      {activeRow}
+      <Box key="band-ticket" flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
+        <Text color={TIER.jira} bold>{ticket ?? 'No ticket'}</Text>
+        {action('band-update', 'Update ticket', false, () => updateTicket($))}
+        {action('band-ac', 'Write AC', false, () => writeAc($))}
+      </Box>
+      <Box key="band-meters" flexDirection="row" flexWrap="wrap" gap={2} alignItems="center">
+        {meter('5h', usage.fiveHour)}
+        {meter('Weekly', usage.weekly)}
+        {meter('On-demand', usage.onDemand)}
+        {meter('Context', usage.context)}
+        {action('band-compact', 'Compact', false, () => compact($))}
+        {action('band-refresh', '↻ Usage', false, () => refreshUsage($))}
+      </Box>
+    </Box>
+  )
+}
+
 // --- hooks -----------------------------------------------------------------
 
 export const register: Register = on => {
@@ -603,13 +688,13 @@ export const register: Register = on => {
     await $.command.register({ name: COMMAND, description: 'Open the Jira Devflow panel' })
     $.clock.every(USAGE_REFRESH_MS, () => void refreshUsage($))
     void refreshUsage($)
-    void $.ui.open({ id: PANE_ID, title: PANE_TITLE })
+    void openPane($)
     return next(e)
   })
 
   on('command.run', { command: COMMAND }, async $ => {
-    await $.ui.open({ id: PANE_ID, title: PANE_TITLE })
-    return { text: 'Jira Devflow panel opened.' }
+    const isPlaced = await openPane($)
+    return { text: isPlaced ? 'Jira Devflow panel opened.' : 'Jira Devflow shown above the prompt (this surface has no panes).' }
   })
 
   on('prompt.submit', async ($, e, next) => {
@@ -661,4 +746,9 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, ($, e) => renderPane($, e))
+
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.surface === 'terminal' || e.surface === 'mobile' || !(await getBand($))) return next(e)
+    return renderBand($, e)
+  })
 }
