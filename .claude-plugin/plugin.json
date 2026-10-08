@@ -1,6 +1,6 @@
 {
   "name": "claude-code-jira-devflow",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Jira + git devflow panel for Claude Code: ticket updates, AC, findings, plan naming, commit/push, AI review and usage meters.",
   "author": { "name": "A. N. Tanvir" },
   "license": "MIT",
