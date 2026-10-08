@@ -3,7 +3,6 @@ export type DevflowConfig = {
   status: string
   developedBy: string
   labels: string[]
-  onDemandBudgetUsd: number
   updateParts: UpdatePart[]
 }
 
@@ -14,7 +13,6 @@ export type Meter = { percent: number; label: string; resetsAt?: string }
 export type UsageSnapshot = {
   fiveHour?: Meter
   weekly?: Meter
-  onDemand?: Meter
   context?: Meter
 }
 
@@ -36,7 +34,12 @@ export type ReviewChoice = { model: string; effort: string }
 // Dirty files (absolute path → blob hash) when the prompt was sent.
 export type TurnBaseline = { isComposer: boolean; hashes: Record<string, string> }
 
-export type PaneView = 'main' | 'setup' | 'settings' | 'update'
+// Collapsible pane sections; listed ones are expanded.
+export type PaneSection = 'update' | 'settings'
+
+// Typed but unsaved field values; Apply or Save commits them.
+export type DraftField = 'email' | 'developedBy' | 'labels' | 'subject' | 'body'
+export type Drafts = Partial<Record<DraftField, string>>
 
 declare module 'claude-code' {
   interface PluginState {
@@ -48,7 +51,8 @@ declare module 'claude-code' {
       findings: Findings | null
       plan: PlanInfo
       review: ReviewChoice
-      view: PaneView
+      open: PaneSection[]
+      drafts: Drafts
       notice: string | null
       baseline: TurnBaseline | null
       // True when no attached surface placed the pane (e.g. VS Code): draw the band.

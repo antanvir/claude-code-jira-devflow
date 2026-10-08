@@ -27,7 +27,7 @@ export const PUSH_TIMEOUT_MS = 120_000
 // Global key holds user-wide fields; its repo fields (pre per-repo config) seed new repos.
 export const STORE_CONFIG = 'config'
 export const STORE_REPO_CONFIG_PREFIX = 'config:'
-export const GLOBAL_CONFIG_FIELDS = ['email', 'onDemandBudgetUsd'] as const
+export const GLOBAL_CONFIG_FIELDS = ['email'] as const
 export const STORE_CLOUD_ID = 'cloudId'
 
 export const DEFAULT_CONFIG: DevflowConfig = {
@@ -35,7 +35,6 @@ export const DEFAULT_CONFIG: DevflowConfig = {
   status: 'In Progress',
   developedBy: '',
   labels: [],
-  onDemandBudgetUsd: 20,
   updateParts: ['status', 'developedBy', 'labels'],
 }
 
@@ -43,10 +42,8 @@ export const STATUS_OPTIONS = ['In Progress', 'Code Review', 'Ready for QA', 'Do
 export const REVIEW_MODELS = ['opus', 'sonnet', 'fable', 'haiku']
 export const REVIEW_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 
-// Button tiers: Claude Code theme keys or hex.
-export const TIER = {
-  jira: '#4c9aff',
-  warn: 'warning',
-  token: '#a371f7',
-  neutral: 'subtle',
-} as const
+export const JIRA_COLOR = '#4c9aff'
+// Group frames: dashed at rest, accent on hover (theme keys).
+export const GROUP_BORDER = 'subtle'
+export const GROUP_BORDER_HOVER = 'suggestion'
+export const BAR_CELLS = 8

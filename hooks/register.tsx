@@ -5,9 +5,11 @@ import type { EngineInterface, Register, RenderElement, RenderInput } from 'clau
 import type {
   CommitCard,
   DevflowConfig,
+  DraftField,
+  Drafts,
   Findings,
   Meter,
-  PaneView,
+  PaneSection,
   PlanInfo,
   ReviewChoice,
   TurnBaseline,
@@ -19,8 +21,12 @@ import {
   COMMAND,
   CONNECTORS_URL,
   DEFAULT_CONFIG,
+  BAR_CELLS,
   EDIT_TOOL_RE,
   GIT_TIMEOUT_MS,
+  GROUP_BORDER,
+  GROUP_BORDER_HOVER,
+  JIRA_COLOR,
   MIN_FINDINGS_CHARS,
   PANE_ID,
   PANE_TITLE,
@@ -33,7 +39,6 @@ import {
   STORE_CONFIG,
   STORE_REPO_CONFIG_PREFIX,
   TICKET_RE,
-  TIER,
   USAGE_REFRESH_MS,
   UTILITY_MODEL,
 } from './constants'
@@ -41,7 +46,6 @@ import * as fmt from './format'
 
 type Outcome = { isOk: boolean; text: string }
 type GitStep = 'stage' | 'commit' | 'push'
-type Tier = keyof typeof TIER | 'primary'
 
 const IDLE_COMMIT: CommitCard = { files: [], message: '', phase: 'idle' }
 
@@ -56,7 +60,8 @@ const COMMIT = { plugin: 'jira-devflow', key: 'commit' } as const
 const FINDINGS = { plugin: 'jira-devflow', key: 'findings' } as const
 const PLAN = { plugin: 'jira-devflow', key: 'plan' } as const
 const REVIEW = { plugin: 'jira-devflow', key: 'review' } as const
-const VIEW = { plugin: 'jira-devflow', key: 'view' } as const
+const OPEN = { plugin: 'jira-devflow', key: 'open' } as const
+const DRAFTS = { plugin: 'jira-devflow', key: 'drafts' } as const
 const NOTICE = { plugin: 'jira-devflow', key: 'notice' } as const
 const BASELINE = { plugin: 'jira-devflow', key: 'baseline' } as const
 const BAND = { plugin: 'jira-devflow', key: 'band' } as const
@@ -75,7 +80,10 @@ const getPlan = async ($: EngineInterface) => (await $.state.get(PLAN)).value ??
 const setPlan = ($: EngineInterface, value: PlanInfo) => $.state.set(PLAN, value)
 const getReview = async ($: EngineInterface) => (await $.state.get(REVIEW)).value ?? { model: 'opus', effort: 'medium' }
 const setReview = ($: EngineInterface, value: ReviewChoice) => $.state.set(REVIEW, value)
-const getView = async ($: EngineInterface) => (await $.state.get(VIEW)).value ?? 'main'
+const getOpen = async ($: EngineInterface) => (await $.state.get(OPEN)).value ?? []
+const setOpen = ($: EngineInterface, value: PaneSection[]) => $.state.set(OPEN, value)
+const getDrafts = async ($: EngineInterface) => (await $.state.get(DRAFTS)).value ?? {}
+const setDrafts = ($: EngineInterface, value: Drafts) => $.state.set(DRAFTS, value)
 const getNotice = async ($: EngineInterface) => (await $.state.get(NOTICE)).value ?? null
 const getBaseline = async ($: EngineInterface) => (await $.state.get(BASELINE)).value ?? null
 const setBaseline = ($: EngineInterface, value: TurnBaseline | null) => $.state.set(BASELINE, value)
@@ -85,8 +93,37 @@ async function notify($: EngineInterface, text: string | null): Promise<void> {
   await $.state.set(NOTICE, text)
 }
 
-async function show($: EngineInterface, view: PaneView): Promise<void> {
-  await $.state.set(VIEW, view)
+async function setSection($: EngineInterface, section: PaneSection, isOpen: boolean): Promise<void> {
+  const open = (await getOpen($)).filter(s => s !== section)
+  await setOpen($, isOpen ? [...open, section] : open)
+}
+
+async function toggleSection($: EngineInterface, section: PaneSection): Promise<void> {
+  await setSection($, section, !(await getOpen($)).includes(section))
+}
+
+async function setDraft($: EngineInterface, field: DraftField, value: string): Promise<void> {
+  await setDrafts($, { ...(await getDrafts($)), [field]: value })
+}
+
+// Writes typed-but-unsaved values (all, or one field) so nothing typed is lost.
+async function commitDrafts($: EngineInterface, only?: DraftField): Promise<void> {
+  const drafts = await getDrafts($)
+  const fields = (Object.keys(drafts) as DraftField[]).filter(f => !only || f === only)
+  const patch: Partial<DevflowConfig> = {}
+  if (fields.includes('subject') || fields.includes('body')) {
+    const saved = fmt.splitMessage((await getCommit($)).message)
+    await patchCommit($, { message: fmt.joinMessage(drafts.subject ?? saved.subject, drafts.body ?? saved.body) })
+  }
+  for (const field of fields) {
+    const value = drafts[field] ?? ''
+    if (field === 'labels') patch.labels = fmt.parseLabels(value)
+    else if (field === 'email' || field === 'developedBy') patch[field] = value.trim()
+  }
+  if (Object.keys(patch).length > 0) await saveConfig($, patch)
+  const rest = { ...drafts }
+  for (const field of fields) delete rest[field]
+  await setDrafts($, rest)
 }
 
 // Surfaces that place no panes (VS Code) answer isPlaced: false; the band stands in.
@@ -131,9 +168,8 @@ async function loadConfig($: EngineInterface): Promise<DevflowConfig> {
 }
 
 async function refreshUsage($: EngineInterface): Promise<void> {
-  const config = await getConfig($)
   const usage = await $.session.usage()
-  await setUsage($, fmt.toUsageSnapshot(usage, config.onDemandBudgetUsd))
+  await setUsage($, fmt.toUsageSnapshot(usage))
 }
 
 async function compact($: EngineInterface): Promise<void> {
@@ -191,7 +227,7 @@ async function verifyConnector($: EngineInterface): Promise<void> {
   const matches = info.isOk && info.text.toLowerCase().includes(config.email.toLowerCase())
   if (matches) {
     await notify($, `Jira connected as ${config.email}`)
-    await show($, 'main')
+    await setSection($, 'settings', false)
   } else {
     await notify($, info.isOk ? 'Connected, but as a different email' : info.text)
   }
@@ -201,7 +237,8 @@ async function verifyConnector($: EngineInterface): Promise<void> {
 async function requireTicket($: EngineInterface): Promise<{ ticket: string; config: DevflowConfig } | null> {
   const config = await getConfig($)
   if (!config.email) {
-    await show($, 'setup')
+    await setSection($, 'settings', true)
+    await notify($, 'Set your Jira email in Settings first')
     return null
   }
   const ticket = await getTicket($)
@@ -213,9 +250,10 @@ async function requireTicket($: EngineInterface): Promise<{ ticket: string; conf
 }
 
 async function updateTicket($: EngineInterface): Promise<void> {
+  await commitDrafts($)
   const ready = await requireTicket($)
   if (!ready) return
-  await show($, 'main')
+  await setSection($, 'update', false)
   void $.prompt.submit({ text: fmt.updateTicketPrompt(ready.ticket, ready.config) })
 }
 
@@ -288,6 +326,9 @@ async function regenerateMessage($: EngineInterface): Promise<void> {
   const card = await getCommit($)
   if (card.files.length === 0) return
   await patchCommit($, { phase: 'busy', note: 'Writing commit message…' })
+  // A fresh message replaces anything typed into Subject/Body.
+  const { subject: _subject, body: _body, ...otherDrafts } = await getDrafts($)
+  await setDrafts($, otherDrafts)
   const ticket = await getTicket($)
   const [diff, status, rules] = [
     await git($, ['diff', 'HEAD', '--', ...card.files]),
@@ -304,6 +345,8 @@ async function regenerateMessage($: EngineInterface): Promise<void> {
 }
 
 async function runGit($: EngineInterface, step: GitStep): Promise<void> {
+  await commitDrafts($, 'subject')
+  await commitDrafts($, 'body')
   const card = await getCommit($)
   await patchCommit($, { phase: 'busy', note: `${step}…` })
   const staged = await git($, ['add', '--', ...card.files])
@@ -365,15 +408,21 @@ const PART_LABELS: Record<UpdatePart, string> = {
   labels: 'Append labels',
 }
 
+const check = (isOn: boolean) => (isOn ? '☑' : '☐')
+const caret = (isOpen: boolean) => (isOpen ? '▾' : '▸')
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+const JIRA_HINT = 'Save, or it is applied with Apply to Jira'
+const COMMIT_HINT = 'Save, or it is used by Stage/Commit'
+
 async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<RenderElement> {
   const ticket = await getTicket($)
   const config = await getConfig($)
-  const usage = await getUsage($)
   const commit = await getCommit($)
   const findings = await getFindings($)
   const plan = await getPlan($)
   const review = await getReview($)
-  const view = await getView($)
+  const open = await getOpen($)
+  const drafts = await getDrafts($)
   const notice = await getNotice($)
 
   if (e.surface === 'mobile') {
@@ -382,300 +431,300 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
   }
 
   const { Box, Text, Button, Input, Select, Markdown } = $.ui.resolve(e)
-  const isTerminal = e.surface === 'terminal'
+  const isOpen = (section: PaneSection) => open.includes(section)
 
-  // Button has no colour prop, so non-primary tiers get a coloured frame.
-  const action = (key: string, label: string, tier: Tier, onPress: () => Promise<unknown>) =>
-    tier === 'primary' || isTerminal ? (
-      <Button key={key} label={label} variant={tier === 'primary' ? 'primary' : 'secondary'} onPress={() => void onPress()} />
-    ) : (
-      <Box key={`${key}-frame`} borderStyle="round" borderColor={TIER[tier]}>
-        <Button key={key} label={label} plain onPress={() => void onPress()} />
-      </Box>
-    )
+  // Bare Buttons only: native chrome gives equal heights, hover and the pointer cursor.
+  const action = (key: string, label: string, onPress: () => Promise<unknown>, isPrimary = false) => (
+    <Button key={key} label={label} variant={isPrimary ? 'primary' : 'secondary'} onPress={() => void onPress()} />
+  )
 
-  const meterRow = (name: string, meter?: Meter) => (
-    <Box key={`meter-${name}`} flexDirection="row" gap={1}>
-      <Text dimColor>{name.padEnd(9)}</Text>
-      {meter ? <Text color={fmt.levelColor(meter.percent)}>{`${fmt.bar(meter.percent)} ${meter.label}`}</Text> : <Text dimColor>n/a</Text>}
+  // Dashed frame per group; the keyed Box makes the frame light up on hover.
+  const group = (key: string, title: string | null, children: RenderElement[]) => (
+    <Box
+      key={key}
+      flexDirection="column"
+      gap={1}
+      borderStyle="dashed"
+      borderColor={GROUP_BORDER}
+      hover={{ borderColor: GROUP_BORDER_HOVER }}
+      paddingX={1}
+      paddingY={0}
+    >
+      {title ? <Text bold dimColor>{title}</Text> : null}
+      {children}
     </Box>
   )
 
-  const noticeRow = notice ? (
-    <Box key="notice" flexDirection="row" gap={1}>
-      <Text color="suggestion">{notice}</Text>
-      <Button key="notice-x" label="×" plain onPress={() => void notify($, null)} />
+  const row = (key: string, children: RenderElement[]) => (
+    <Box key={key} flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
+      {children}
     </Box>
-  ) : null
+  )
 
-  if (view === 'setup') {
+  // Value shown = the draft while typing, else the saved one; Save/Enter or Apply commits.
+  const field = (key: DraftField, label: string, saved: string, placeholder?: string, hint = JIRA_HINT) => {
+    const draft = drafts[key]
+    const isDirty = draft !== undefined && draft !== saved
     return (
-      <Box flexDirection="column" gap={1}>
-        <Text bold>Connect Jira to use ticket actions</Text>
+      <Box key={`field-${key}`} flexDirection="column">
         <Input
-          key="setup-email"
-          label="Jira / Atlassian email"
-          placeholder="you@company.com"
-          value={config.email}
+          key={key}
+          label={label}
+          placeholder={placeholder}
+          value={draft ?? saved}
           submitLabel="Save"
-          onSubmit={value => void saveConfig($, { email: value.trim() })}
+          onInput={value => void setDraft($, key, value)}
+          onSubmit={value => void setDraft($, key, value).then(() => commitDrafts($, key))}
         />
-        <Markdown text={`Authorise the **Atlassian** connector in [claude.ai connector settings](${CONNECTORS_URL}), then verify.`} />
-        <Box flexDirection="row" gap={1}>
-          {action('verify', 'Verify connection', 'jira', () => verifyConnector($))}
-          {action('setup-back', 'Back', 'neutral', () => show($, 'main'))}
-        </Box>
-        {noticeRow}
+        {isDirty ? <Text color="warning">{`● unsaved — ${hint}`}</Text> : null}
       </Box>
     )
   }
 
-  if (view === 'settings' || view === 'update') {
-    const togglePart = (part: UpdatePart) =>
-      saveConfig($, {
-        updateParts: config.updateParts.includes(part)
-          ? config.updateParts.filter(p => p !== part)
-          : [...config.updateParts, part],
-      })
-    return (
-      <Box flexDirection="column" gap={1}>
-        <Text bold>{view === 'update' ? `Update ${ticket ?? 'ticket'}` : 'Devflow settings'}</Text>
+  const noticeRow = notice
+    ? row('notice', [
+        <Text key="notice-text" color="suggestion">{notice}</Text>,
+        <Button key="notice-x" label="×" plain dimColor onPress={() => void notify($, null)} />,
+      ])
+    : null
+
+  const togglePart = (part: UpdatePart) =>
+    saveConfig($, {
+      updateParts: config.updateParts.includes(part)
+        ? config.updateParts.filter(p => p !== part)
+        : [...config.updateParts, part],
+    })
+
+  const updateSection = isOpen('update') ? (
+    <Box key="update-body" flexDirection="column" gap={1} borderStyle="single" borderColor={GROUP_BORDER} paddingX={1}>
+      <Text bold>{`Apply to ${ticket ?? 'ticket'}`}</Text>
+      <Box flexDirection="column">
         {(Object.keys(PART_LABELS) as UpdatePart[]).map(part => (
           <Button
             key={`part-${part}`}
-            label={`${config.updateParts.includes(part) ? '☑' : '☐'} ${PART_LABELS[part]}`}
+            label={`${check(config.updateParts.includes(part))} ${PART_LABELS[part]}`}
             plain
             onPress={() => void togglePart(part)}
           />
         ))}
-        <Select
-          key="status"
-          label="Status"
-          options={fmt.toOptions(STATUS_OPTIONS)}
-          value={config.status}
-          onSelect={value => void saveConfig($, { status: value })}
-        />
-        <Input
-          key="developed-by"
-          label="Developed by"
-          placeholder={config.email || 'Name or email'}
-          value={config.developedBy}
-          submitLabel="Save"
-          onSubmit={value => void saveConfig($, { developedBy: value.trim() })}
-        />
-        <Input
-          key="labels"
-          label="Labels to append (comma-separated)"
-          placeholder="e.g. backend, release-notes"
-          value={config.labels.join(', ')}
-          submitLabel="Save"
-          onSubmit={value => void saveConfig($, { labels: value.split(',').map(l => l.trim()).filter(Boolean) })}
-        />
-        {view === 'settings' ? (
-          <Box flexDirection="column" gap={1}>
-            <Input
-              key="email"
-              label="Jira email"
-              value={config.email}
-              submitLabel="Save"
-              onSubmit={value => void saveConfig($, { email: value.trim() })}
-            />
-            <Input
-              key="budget"
-              label="On-demand budget (USD)"
-              value={String(config.onDemandBudgetUsd)}
-              submitLabel="Save"
-              onSubmit={value => void saveConfig($, { onDemandBudgetUsd: Number(value) || 0 })}
-            />
-          </Box>
-        ) : null}
-        <Box flexDirection="row" gap={1}>
-          {view === 'update' ? action('apply', 'Apply to Jira', 'primary', () => updateTicket($)) : null}
-          {action('close', view === 'update' ? 'Cancel' : 'Done', 'neutral', () => show($, 'main'))}
-        </Box>
-        {noticeRow}
       </Box>
-    )
-  }
+      <Select
+        key="status"
+        label="Status"
+        options={fmt.toOptions(STATUS_OPTIONS)}
+        value={config.status}
+        onSelect={value => void saveConfig($, { status: value })}
+      />
+      {field('developedBy', 'Developed by', config.developedBy, config.email || 'Name or email')}
+      {field('labels', 'Labels to append (comma-separated)', fmt.labelsText(config.labels), 'e.g. backend, release-notes')}
+      {row('update-actions', [
+        action('apply', 'Apply to Jira', () => updateTicket($), true),
+        action('update-cancel', 'Cancel', () => setSection($, 'update', false)),
+      ])}
+    </Box>
+  ) : null
 
+  const settingsSection = isOpen('settings') ? (
+    <Box key="settings-body" flexDirection="column" gap={1} borderStyle="single" borderColor={GROUP_BORDER} paddingX={1}>
+      <Text bold>Jira setup</Text>
+      {field('email', 'Jira / Atlassian email', config.email, 'you@company.com')}
+      <Markdown text={`Authorise the **Atlassian** connector in [claude.ai connector settings](${CONNECTORS_URL}), then verify.`} />
+      {row('settings-actions', [
+        action('verify', 'Verify connection', () => verifyConnector($)),
+        action('settings-close', 'Close', () => setSection($, 'settings', false)),
+      ])}
+    </Box>
+  ) : null
+
+  const message = fmt.splitMessage(commit.message)
   const isAfterCommit = commit.phase === 'pushed' || commit.phase === 'committed'
-  const reviewRow = isAfterCommit ? (
-    <Box key="review" flexDirection="column" gap={1}>
-      <Box flexDirection="row" gap={1}>
+  const reviewSection = isAfterCommit ? (
+    <Box key="review" flexDirection="column" gap={1} borderStyle="single" borderColor={GROUP_BORDER} paddingX={1}>
+      <Text bold>AI Review</Text>
+      {row('review-picks', [
         <Select
           key="review-model"
           label="Model"
           options={fmt.toOptions(REVIEW_MODELS)}
           value={review.model}
           onSelect={value => void patchReview($, { model: value })}
-        />
+        />,
         <Select
           key="review-effort"
           label="Effort"
           options={fmt.toOptions(REVIEW_EFFORTS)}
           value={review.effort}
           onSelect={value => void patchReview($, { effort: value })}
-        />
-      </Box>
-      <Box flexDirection="row" gap={1}>
-        {action('review', 'AI Review', 'token', () => startReview($))}
-        {action('done', 'Done', 'neutral', () => setCommit($, IDLE_COMMIT))}
-      </Box>
+        />,
+      ])}
+      {row('review-actions', [
+        action('review', 'AI Review', () => startReview($), true),
+        action('review-done', 'Done', () => setCommit($, IDLE_COMMIT)),
+      ])}
     </Box>
   ) : null
 
-  const commitCard =
-    commit.phase === 'idle' ? null : (
-      <Box key="commit" flexDirection="column" gap={1} borderStyle="round" borderColor="subtle" paddingX={1}>
-        <Text bold>{`Commit (${commit.files.length} file${commit.files.length === 1 ? '' : 's'})`}</Text>
-        {commit.files.map(file => (
-          <Text key={`file-${file}`} dimColor wrap="truncate-start">{file}</Text>
-        ))}
-        <Input
-          key="commit-message"
-          label="Message (no Co-Authored-By)"
-          value={commit.message}
-          submitLabel="Save"
-          onSubmit={value => void patchCommit($, { message: value })}
-        />
-        {commit.phase === 'ready' ? (
-          <Box flexDirection="row" flexWrap="wrap" gap={1}>
-            {action('stage', 'Stage', 'neutral', () => runGit($, 'stage'))}
-            {action('commit', 'Commit', 'primary', () => runGit($, 'commit'))}
-            {action('push', 'Commit & Push', 'warn', () => runGit($, 'push'))}
-            {action('regen', '↻ Regenerate', 'neutral', () => regenerateMessage($))}
-            {action('dismiss', 'Dismiss', 'neutral', () => setCommit($, IDLE_COMMIT))}
-          </Box>
-        ) : null}
-        {commit.note ? <Text dimColor>{commit.note}</Text> : null}
-        {reviewRow}
-      </Box>
-    )
+  const commitGroup =
+    commit.phase === 'idle'
+      ? null
+      : group('g-commit', `COMMIT · ${plural(commit.files.length, 'file')}`, [
+          <Box key="commit-files" flexDirection="column">
+            {commit.files.map(file => (
+              <Text key={`file-${file}`} dimColor wrap="truncate-start">{file}</Text>
+            ))}
+          </Box>,
+          <Text key="commit-message-hint" dimColor>Message (no Co-Authored-By)</Text>,
+          field('subject', 'Subject', message.subject, commit.phase === 'busy' ? 'Writing…' : 'PROJ-1234: What changed', COMMIT_HINT),
+          field('body', 'Body', message.body, 'Optional second line', COMMIT_HINT),
+          commit.phase === 'ready'
+            ? row('commit-actions', [
+                action('stage', 'Stage', () => runGit($, 'stage')),
+                action('commit', 'Commit', () => runGit($, 'commit'), true),
+                action('push', 'Commit & Push', () => runGit($, 'push')),
+                action('regen', '↻ Regenerate', () => regenerateMessage($)),
+                action('dismiss', 'Dismiss', () => setCommit($, IDLE_COMMIT)),
+              ])
+            : null,
+          commit.note ? <Text key="commit-note" dimColor>{commit.note}</Text> : null,
+          reviewSection,
+        ].filter(Boolean) as RenderElement[])
 
-  const findingsCard =
-    findings && !findings.isShared ? (
-      <Box key="findings" flexDirection="row" flexWrap="wrap" gap={1}>
-        <Text>{`Findings for ${findings.ticket} ready`}</Text>
-        {action('share', 'Share findings in Jira', 'jira', () => shareFindings($))}
-        {action('findings-x', 'Dismiss', 'neutral', () => setFindings($, null))}
-      </Box>
-    ) : null
+  const findingsGroup =
+    findings && !findings.isShared
+      ? group('g-findings', 'FINDINGS', [
+          <Text key="findings-text">{`Findings for ${findings.ticket} ready`}</Text>,
+          row('findings-actions', [
+            action('share', 'Share findings in Jira', () => shareFindings($), true),
+            action('findings-x', 'Dismiss', () => setFindings($, null)),
+          ]),
+        ])
+      : null
 
   return (
-    <Box flexDirection="column" gap={1}>
-      <Box flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
-        <Text color={TIER.jira} bold>{ticket ?? 'No ticket'}</Text>
-        <Text dimColor>{config.email || 'Jira not set up'}</Text>
-      </Box>
-      <Box flexDirection="row" flexWrap="wrap" gap={1}>
-        {action('update', 'Update ticket ▾', 'jira', () => show($, config.email ? 'update' : 'setup'))}
-        {action('ac', 'Write AC', 'neutral', () => writeAc($))}
-        {action('settings', '⚙ Settings', 'neutral', () => show($, 'settings'))}
-      </Box>
-      <Input
-        key="ticket"
-        label="Ticket"
-        placeholder="PROJ-1234"
-        value={ticket ?? ''}
-        submitLabel="Set"
-        onSubmit={value => void setTicket($, value.trim().toUpperCase() || null)}
-      />
-      <Button
-        key="plan-jira"
-        label={`${plan.postToJira ? '☑' : '☐'} Add plan (.md) as a Jira comment`}
-        plain
-        onPress={() => void patchPlan($, { postToJira: !plan.postToJira })}
-      />
-      {plan.renamedPath ? <Text dimColor wrap="truncate-start">{`Plan saved as ${plan.renamedPath}`}</Text> : null}
+    <Box flexDirection="column" gap={1} paddingX={1}>
+      {group('g-ticket', null, [
+        row('ticket-head', [
+          <Text key="ticket-key" color={JIRA_COLOR} bold>{ticket ?? 'No ticket'}</Text>,
+          <Text key="ticket-email" dimColor>{config.email || 'Jira not set up'}</Text>,
+        ]),
+        <Input
+          key="ticket"
+          label="Ticket"
+          placeholder="PROJ-1234"
+          value={ticket ?? ''}
+          submitLabel="Set"
+          onSubmit={value => void setTicket($, value.trim().toUpperCase() || null)}
+        />,
+      ])}
+      {group('g-jira', 'JIRA', [
+        row('jira-actions', [
+          action('update', `Update ticket ${caret(isOpen('update'))}`, () => toggleSection($, 'update')),
+          action('ac', 'Write AC', () => writeAc($)),
+          action('settings', `⚙ Settings ${caret(isOpen('settings'))}`, () => toggleSection($, 'settings')),
+        ]),
+        updateSection,
+        settingsSection,
+      ].filter(Boolean) as RenderElement[])}
+      {group('g-plan', 'PLAN', [
+        <Button
+          key="plan-jira"
+          label={`${check(plan.postToJira)} Add plan (.md) as a Jira comment`}
+          plain
+          onPress={() => void patchPlan($, { postToJira: !plan.postToJira })}
+        />,
+        plan.renamedPath ? <Text key="plan-path" dimColor wrap="truncate-start">{`Saved as ${plan.renamedPath}`}</Text> : null,
+      ].filter(Boolean) as RenderElement[])}
       {noticeRow}
-      {findingsCard}
-      {commitCard}
-      <Box flexDirection="column">
-        {meterRow('5h', usage.fiveHour)}
-        {meterRow('Weekly', usage.weekly)}
-        {meterRow('On-demand', usage.onDemand)}
-        {meterRow('Context', usage.context)}
-      </Box>
-      <Box flexDirection="row" gap={1}>
-        {action('compact', 'Compact', 'warn', () => compact($))}
-        {action('refresh', '↻ Usage', 'neutral', () => refreshUsage($))}
-      </Box>
+      {findingsGroup}
+      {commitGroup}
     </Box>
   )
 }
 
-// --- band (surfaces without panes) -----------------------------------------
-// Rows top to bottom: active card, ticket actions, meters (closest to the prompt).
+// --- band above the prompt --------------------------------------------------
+// Usage meters always (every surface, every session); ticket/commit rows only
+// where no pane was placed.
 
 async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Promise<RenderElement> {
-  const ticket = await getTicket($)
   const usage = await getUsage($)
-  const commit = await getCommit($)
-  const findings = await getFindings($)
-  const notice = await getNotice($)
+  const isFallback = await getBand($)
   const { Box, Text, Button } = $.ui.resolve(e)
 
-  const action = (key: string, label: string, isPrimary: boolean, onPress: () => Promise<unknown>) => (
+  const action = (key: string, label: string, onPress: () => Promise<unknown>, isPrimary = false) => (
     <Button key={key} label={label} variant={isPrimary ? 'primary' : 'secondary'} onPress={() => void onPress()} />
   )
   const meter = (name: string, m?: Meter) => (
-    <Text key={`meter-${name}`} color={m ? fmt.levelColor(m.percent) : undefined} dimColor={!m}>
-      {`${name} ${m ? m.label : 'n/a'}`}
-    </Text>
+    <Box key={`meter-${name}`} flexDirection="row" gap={1}>
+      <Text dimColor>{name}</Text>
+      {m ? (
+        <Text color={fmt.levelColor(m.percent)}>{`${fmt.bar(m.percent, BAR_CELLS)} ${m.label}`}</Text>
+      ) : (
+        <Text dimColor>n/a</Text>
+      )}
+    </Box>
+  )
+  const meters = (
+    <Box key="band-meters" flexDirection="row" flexWrap="wrap" columnGap={3} alignItems="center">
+      {meter('5h', usage.fiveHour)}
+      {meter('Weekly', usage.weekly)}
+      {meter('Context', usage.context)}
+      <Box flexDirection="row" gap={1}>
+        {action('band-compact', 'Compact', () => compact($))}
+        <Button key="band-refresh" label="↻" plain dimColor onPress={() => void refreshUsage($)} />
+      </Box>
+    </Box>
+  )
+  if (!isFallback) return <Box flexDirection="column" width="100%">{meters}</Box>
+
+  const ticket = await getTicket($)
+  const commit = await getCommit($)
+  const findings = await getFindings($)
+  const notice = await getNotice($)
+  const isAfterCommit = commit.phase === 'pushed' || commit.phase === 'committed'
+  const line = (key: string, children: RenderElement[]) => (
+    <Box key={key} flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
+      {children}
+    </Box>
   )
 
-  const isAfterCommit = commit.phase === 'pushed' || commit.phase === 'committed'
   let activeRow: RenderElement | null = null
   if (commit.phase === 'ready') {
-    activeRow = (
-      <Box key="band-commit" flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
-        <Text bold>{`Commit ${commit.files.length} file${commit.files.length === 1 ? '' : 's'}:`}</Text>
-        <Text dimColor wrap="truncate-end">{commit.message.split('\n')[0] || '…'}</Text>
-        {action('band-commit-go', 'Commit', true, () => runGit($, 'commit'))}
-        {action('band-push', 'Commit & Push', false, () => runGit($, 'push'))}
-        {action('band-commit-x', 'Dismiss', false, () => setCommit($, IDLE_COMMIT))}
-      </Box>
-    )
+    activeRow = line('band-commit', [
+      <Text key="t" bold>{`Commit ${plural(commit.files.length, 'file')}:`}</Text>,
+      <Text key="m" dimColor wrap="truncate-end">{commit.message.split('\n')[0] || '…'}</Text>,
+      action('band-commit-go', 'Commit', () => runGit($, 'commit'), true),
+      action('band-push', 'Commit & Push', () => runGit($, 'push')),
+      action('band-commit-x', 'Dismiss', () => setCommit($, IDLE_COMMIT)),
+    ])
   } else if (isAfterCommit) {
-    activeRow = (
-      <Box key="band-review" flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
-        <Text dimColor>{commit.note ?? (commit.phase === 'pushed' ? 'Pushed' : 'Committed')}</Text>
-        {action('band-review-go', 'AI Review', true, () => startReview($))}
-        {action('band-review-x', 'Done', false, () => setCommit($, IDLE_COMMIT))}
-      </Box>
-    )
+    activeRow = line('band-review', [
+      <Text key="t" dimColor>{commit.note ?? (commit.phase === 'pushed' ? 'Pushed' : 'Committed')}</Text>,
+      action('band-review-go', 'AI Review', () => startReview($), true),
+      action('band-review-x', 'Done', () => setCommit($, IDLE_COMMIT)),
+    ])
   } else if (findings && !findings.isShared) {
-    activeRow = (
-      <Box key="band-findings" flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
-        <Text>{`Findings for ${findings.ticket} ready`}</Text>
-        {action('band-share', 'Share in Jira', true, () => shareFindings($))}
-        {action('band-findings-x', 'Dismiss', false, () => setFindings($, null))}
-      </Box>
-    )
+    activeRow = line('band-findings', [
+      <Text key="t">{`Findings for ${findings.ticket} ready`}</Text>,
+      action('band-share', 'Share in Jira', () => shareFindings($), true),
+      action('band-findings-x', 'Dismiss', () => setFindings($, null)),
+    ])
   }
 
   return (
     <Box flexDirection="column" width="100%">
-      {notice ? (
-        <Box key="band-notice" flexDirection="row" gap={1}>
-          <Text color="suggestion">{notice}</Text>
-          <Button key="band-notice-x" label="×" plain onPress={() => void notify($, null)} />
-        </Box>
-      ) : null}
+      {notice
+        ? line('band-notice', [
+            <Text key="t" color="suggestion">{notice}</Text>,
+            <Button key="band-notice-x" label="×" plain dimColor onPress={() => void notify($, null)} />,
+          ])
+        : null}
       {activeRow}
-      <Box key="band-ticket" flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
-        <Text color={TIER.jira} bold>{ticket ?? 'No ticket'}</Text>
-        {action('band-update', 'Update ticket', false, () => updateTicket($))}
-        {action('band-ac', 'Write AC', false, () => writeAc($))}
-      </Box>
-      <Box key="band-meters" flexDirection="row" flexWrap="wrap" gap={2} alignItems="center">
-        {meter('5h', usage.fiveHour)}
-        {meter('Weekly', usage.weekly)}
-        {meter('On-demand', usage.onDemand)}
-        {meter('Context', usage.context)}
-        {action('band-compact', 'Compact', false, () => compact($))}
-        {action('band-refresh', '↻ Usage', false, () => refreshUsage($))}
-      </Box>
+      {line('band-ticket', [
+        <Text key="t" color={JIRA_COLOR} bold>{ticket ?? 'No ticket'}</Text>,
+        action('band-update', 'Update ticket', () => updateTicket($)),
+        action('band-ac', 'Write AC', () => writeAc($)),
+      ])}
+      {meters}
     </Box>
   )
 }
@@ -748,7 +797,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, ($, e) => renderPane($, e))
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.surface === 'terminal' || e.surface === 'mobile' || !(await getBand($))) return next(e)
+    if (e.surface === 'mobile') return next(e)
     return renderBand($, e)
   })
 }

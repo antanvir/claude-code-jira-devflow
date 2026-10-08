@@ -11,6 +11,17 @@ const round = (n: number) => Math.round(n * 10) / 10
 
 export const toOptions = (values: readonly string[]) => values.map(value => ({ value }))
 
+export const parseLabels = (text: string) => text.split(',').map(label => label.trim()).filter(Boolean)
+export const labelsText = (labels: readonly string[]) => labels.join(', ')
+
+// Commit messages are subject + optional one-line body (2-line rule); inputs are single-line.
+export function splitMessage(message: string): { subject: string; body: string } {
+  const [subject = '', ...rest] = message.split('\n').map(line => line.trim()).filter(Boolean)
+  return { subject, body: rest.join(' ') }
+}
+
+export const joinMessage = (subject: string, body: string) => [subject.trim(), body.trim()].filter(Boolean).join('\n')
+
 export function splitConfig(config: Partial<DevflowConfig>) {
   const user: Partial<DevflowConfig> = {}
   const repo: Partial<DevflowConfig> = { ...config }
@@ -40,25 +51,16 @@ function resetLabel(resetsAt?: string): string {
   return `↻${hours}h${Math.floor((ms % 3_600_000) / 60_000)}m`
 }
 
-export function toUsageSnapshot(usage: SessionUsage, budgetUsd: number): UsageSnapshot {
-  const limit = (kind: string) => usage.rateLimits.find(r => r.kind === kind)
+export function toUsageSnapshot(usage: SessionUsage): UsageSnapshot {
   const meter = (kind: string): Meter | undefined => {
-    const found = limit(kind)
+    const found = usage.rateLimits.find(r => r.kind === kind)
     if (!found) return undefined
     return { percent: found.percentUsed, label: `${found.percentUsed}% ${resetLabel(found.resetsAt)}`.trim() }
-  }
-  const spend = limit('spend_limit')
-  const usd = usage.cost?.usd
-  let onDemand: Meter | undefined
-  if (spend) onDemand = { percent: spend.percentUsed, label: `${spend.percentUsed}%` }
-  else if (usd !== undefined && budgetUsd > 0) {
-    onDemand = { percent: round((usd / budgetUsd) * 100), label: `$${usd.toFixed(2)}/$${budgetUsd}` }
   }
   const ctx = usage.context.percent
   return {
     fiveHour: meter('five_hour'),
     weekly: meter('seven_day'),
-    onDemand,
     context: ctx === undefined ? undefined : { percent: round(ctx), label: `${round(ctx)}%` },
   }
 }
