@@ -2,7 +2,7 @@
 import type { SessionUsage } from 'claude-code'
 
 import type { DevflowConfig, Meter, UsageSnapshot } from '../types'
-import { DANGER_PERCENT, MAX_DIFF_CHARS, WARN_PERCENT } from './constants'
+import { DANGER_PERCENT, MAX_DIFF_CHARS, PLUGIN, WARN_PERCENT } from './constants'
 
 const UUID_RE = /"(?:id|cloudId)"\s*:\s*"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/i
 const GIT_RULES_RE = /##\s*Git Commits?[^\n]*\n([\s\S]*?)(?=\n##\s|$)/i
@@ -74,6 +74,27 @@ export function filterDirty(files: string[], porcelain: string): string[] {
   return files.filter(file => dirty.some(path => normalize(file).endsWith(path)))
 }
 
+export type DirtyEntry = { path: string; isDeleted: boolean }
+
+// Parses `git status --porcelain -z`; a rename/copy is followed by its source path.
+export function parsePorcelainZ(output: string): DirtyEntry[] {
+  const parts = output.split('\0')
+  const entries: DirtyEntry[] = []
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i] ?? ''
+    if (part.length < 4) continue
+    const code = part.slice(0, 2)
+    entries.push({ path: part.slice(3), isDeleted: code.includes('D') })
+    if (/[RC]/.test(code)) i++
+  }
+  return entries
+}
+
+// Files dirty now whose content differs from (or was clean at) the baseline.
+export function changedSince(before: Record<string, string>, after: Record<string, string>): string[] {
+  return Object.keys(after).filter(path => before[path] !== after[path])
+}
+
 export function stripAttribution(message: string): string {
   return message
     .replace(/(^```\w*\n?)|(```$)/g, '')
@@ -130,8 +151,12 @@ export function namedPlanPath(path: string, ticket: string | null, name: string)
 
 // --- prompts the mod submits ----------------------------------------------
 
-// Status/field/label changes vary per Jira project, so the model does them
-// through the user's update-jira-ticket skill (fuzzy matching, custom fields).
+// Status/field/label changes vary per Jira project, so the model does them through
+// the skills bundled in skills/. Plugin-namespaced so a user's own same-named skill
+// (often hardcoded to its owner) never runs from the panel.
+const UPDATE_SKILL = `${PLUGIN}:update-jira-ticket`
+const AC_SKILL = `${PLUGIN}:write-acceptance-criteria`
+
 export function updateTicketPrompt(ticket: string, config: DevflowConfig): string {
   const asks: string[] = []
   if (config.updateParts.includes('status')) asks.push(`status → "${config.status}"`)
@@ -140,11 +165,11 @@ export function updateTicketPrompt(ticket: string, config: DevflowConfig): strin
     const labels = config.labels.map(label => JSON.stringify(label)).join(', ')
     asks.push(`append labels ${labels} (keep existing labels)`)
   }
-  return `Use the update-jira-ticket skill on ${ticket}: ${asks.join('; ')}. Jira user email: ${config.email}. Report what changed in one line.`
+  return `Use the ${UPDATE_SKILL} skill on ${ticket}: ${asks.join('; ')}. Jira user email: ${config.email}. Report what changed in one line.`
 }
 
 export function writeAcPrompt(ticket: string): string {
-  return `Use the write-acceptance-criteria skill for ${ticket} based on this session's work.`
+  return `Use the ${AC_SKILL} skill for ${ticket} based on this session's work.`
 }
 
 export function reviewPrompt(model: string, effort: string, base: string): string {

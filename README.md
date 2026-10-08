@@ -9,14 +9,16 @@ Everything lives in one **Jira Devflow** panel. It opens when a session starts, 
 ## Features
 
 - **Jira setup:** the first Jira action asks for your Jira email and saves it for later sessions. *Verify connection* checks that the Atlassian connector is connected and signed in with that email.
-- **Ticket:** the mod picks up a ticket key (e.g. `PBN-1234`) from your prompt, or you can set it in the panel.
-- **Update ticket:** sets the status, sets Developed by and appends labels (default `Enosis`, `pbn`) through your `update-jira-ticket` skill. You choose which of these to apply, and the choice is saved.
-- **Write AC:** runs your `write-acceptance-criteria` skill for the ticket.
+- **Ticket:** the mod picks up a ticket key (e.g. `PROJ-1234`) from your prompt, or you can set it in the panel.
+- **Update ticket:** sets the status, sets Developed by and appends the labels you enter in the panel (none by default) through the bundled `update-jira-ticket` skill. You choose which of these to apply, and the choice is saved. Nothing else on the ticket is changed.
+- **Write AC:** runs the bundled `write-acceptance-criteria` skill for the ticket and saves the criteria to its Acceptance Criteria field (or a comment if the field doesn't exist).
 - **Share findings:** after a turn that analysed the ticket without editing files, posts Claude's answer as a Jira comment.
 - **Plan files:** after a plan is approved, saves a copy named `<TICKET>-<concise-name>.md` next to the original. Turn on *Add plan as a Jira comment* to post the plan too, whichever approval option you pick.
 - **Commit card:** after Claude edits files, lists the touched files and writes a commit message that follows the *Git Commits* section of your CLAUDE.md, with no Co-Authored-By line. Buttons: Stage, Commit, Commit & Push, Regenerate.
 - **AI Review:** after a commit or push, asks Claude to start a review agent on `git diff <base>...HEAD` with the model and effort you choose.
 - **Usage:** 5-hour, weekly, on-demand and context meters, colour-coded (green below 60%, amber 60–85%, red 85%+), with a **Compact** button.
+
+Both Jira skills ship in [skills/](skills/) and are invoked as `claude-code-jira-devflow:<skill>`, so no personal skills are needed and any same-named skills of your own are left alone.
 
 ## Requirements
 

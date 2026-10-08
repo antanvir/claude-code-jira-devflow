@@ -33,6 +33,9 @@ export type PlanInfo = { path?: string; renamedPath?: string; postToJira: boolea
 
 export type ReviewChoice = { model: string; effort: string }
 
+// Dirty files (absolute path → blob hash) when the prompt was sent.
+export type TurnBaseline = { isComposer: boolean; hashes: Record<string, string> }
+
 export type PaneView = 'main' | 'setup' | 'settings' | 'update'
 
 declare module 'claude-code' {
@@ -47,6 +50,7 @@ declare module 'claude-code' {
       review: ReviewChoice
       view: PaneView
       notice: string | null
+      baseline: TurnBaseline | null
     }
   }
 }

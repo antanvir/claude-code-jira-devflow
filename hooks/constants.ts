@@ -31,7 +31,7 @@ export const DEFAULT_CONFIG: DevflowConfig = {
   email: '',
   status: 'In Progress',
   developedBy: '',
-  labels: ['Enosis', 'pbn'],
+  labels: [],
   onDemandBudgetUsd: 20,
   updateParts: ['status', 'developedBy', 'labels'],
 }

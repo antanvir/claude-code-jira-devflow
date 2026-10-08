@@ -27,8 +27,8 @@ test('on-demand meter falls back to session cost against the budget', async () =
 })
 
 test('commit messages lose attribution lines', async () => {
-  const message = fmt.stripAttribution('PBN-1: Fix fee\n\nCo-Authored-By: Claude <noreply@anthropic.com>')
-  expect(message).toBe('PBN-1: Fix fee')
+  const message = fmt.stripAttribution('PROJ-1: Fix fee\n\nCo-Authored-By: Claude <noreply@anthropic.com>')
+  expect(message).toBe('PROJ-1: Fix fee')
 })
 
 test('only touched files git still lists are kept', async () => {
@@ -36,16 +36,37 @@ test('only touched files git still lists are kept', async () => {
   expect(fmt.filterDirty(files, ' M src/a.ts\n')).toEqual(['C:\\repo\\src\\a.ts'])
 })
 
+test('porcelain -z entries keep leading-space codes and skip rename sources', async () => {
+  const output = ' M src/a.ts\0?? new dir/b.md\0R  c.ts\0old-c.ts\0 D gone.ts\0'
+  expect(fmt.parsePorcelainZ(output)).toEqual([
+    { path: 'src/a.ts', isDeleted: false },
+    { path: 'new dir/b.md', isDeleted: false },
+    { path: 'c.ts', isDeleted: false },
+    { path: 'gone.ts', isDeleted: true },
+  ])
+})
+
+test('a turn changes files that became dirty or whose content changed', async () => {
+  const before = { '/r/a.ts': 'h1', '/r/b.ts': 'h2' }
+  const after = { '/r/a.ts': 'h1', '/r/b.ts': 'h3', '/r/c.ts': 'h4' }
+  expect(fmt.changedSince(before, after)).toEqual(['/r/b.ts', '/r/c.ts'])
+})
+
 test('plan copies are named <TICKET>-<name>.md beside the original', async () => {
   const path = 'C:\\Users\\me\\.claude\\plans\\sleepy-otter.md'
-  expect(fmt.namedPlanPath(path, 'PBN-1234', fmt.slugify('Refund Fee Fix!'))).toBe(
-    'C:\\Users\\me\\.claude\\plans/PBN-1234-refund-fee-fix.md',
+  expect(fmt.namedPlanPath(path, 'PROJ-1234', fmt.slugify('Refund Fee Fix!'))).toBe(
+    'C:\\Users\\me\\.claude\\plans/PROJ-1234-refund-fee-fix.md',
   )
   expect(fmt.headingSlug('# Plan: Fix refund double count\n...')).toBe('fix-refund-double-count')
 })
 
 test('update prompt includes only the enabled parts', async () => {
-  const prompt = fmt.updateTicketPrompt('PBN-1', { ...DEFAULT_CONFIG, email: 'a@b.c', updateParts: ['labels'] })
-  expect(prompt.includes('append labels "Enosis", "pbn"')).toBe(true)
+  const prompt = fmt.updateTicketPrompt('PROJ-1', { ...DEFAULT_CONFIG, email: 'a@b.c', labels: ['team-a', 'qa'], updateParts: ['labels'] })
+  expect(prompt.includes('append labels "team-a", "qa"')).toBe(true)
   expect(prompt.includes('status')).toBe(false)
+})
+
+test('prompts use the bundled, plugin-namespaced skills', async () => {
+  expect(fmt.updateTicketPrompt('PROJ-1', DEFAULT_CONFIG).includes('claude-code-jira-devflow:update-jira-ticket skill')).toBe(true)
+  expect(fmt.writeAcPrompt('PROJ-1').includes('claude-code-jira-devflow:write-acceptance-criteria skill')).toBe(true)
 })

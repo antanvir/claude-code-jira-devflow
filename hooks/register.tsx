@@ -10,6 +10,7 @@ import type {
   PaneView,
   PlanInfo,
   ReviewChoice,
+  TurnBaseline,
   UpdatePart,
   UsageSnapshot,
 } from '../types'
@@ -56,6 +57,7 @@ const PLAN = { plugin: 'claude-code-jira-devflow', key: 'plan' } as const
 const REVIEW = { plugin: 'claude-code-jira-devflow', key: 'review' } as const
 const VIEW = { plugin: 'claude-code-jira-devflow', key: 'view' } as const
 const NOTICE = { plugin: 'claude-code-jira-devflow', key: 'notice' } as const
+const BASELINE = { plugin: 'claude-code-jira-devflow', key: 'baseline' } as const
 
 const getTicket = async ($: EngineInterface) => (await $.state.get(TICKET)).value ?? null
 const setTicket = ($: EngineInterface, value: string | null) => $.state.set(TICKET, value)
@@ -73,6 +75,8 @@ const getReview = async ($: EngineInterface) => (await $.state.get(REVIEW)).valu
 const setReview = ($: EngineInterface, value: ReviewChoice) => $.state.set(REVIEW, value)
 const getView = async ($: EngineInterface) => (await $.state.get(VIEW)).value ?? 'main'
 const getNotice = async ($: EngineInterface) => (await $.state.get(NOTICE)).value ?? null
+const getBaseline = async ($: EngineInterface) => (await $.state.get(BASELINE)).value ?? null
+const setBaseline = ($: EngineInterface, value: TurnBaseline | null) => $.state.set(BASELINE, value)
 
 async function notify($: EngineInterface, text: string | null): Promise<void> {
   await $.state.set(NOTICE, text)
@@ -176,7 +180,7 @@ async function requireTicket($: EngineInterface): Promise<{ ticket: string; conf
   }
   const ticket = await getTicket($)
   if (!ticket) {
-    await notify($, 'No ticket yet: mention one (e.g. PBN-1234) in a prompt or set it in the panel')
+    await notify($, 'No ticket yet: mention one (e.g. PROJ-1234) in a prompt or set it in the panel')
     return null
   }
   return { ticket, config }
@@ -209,7 +213,32 @@ async function shareFindings($: EngineInterface): Promise<void> {
 async function git($: EngineInterface, args: string[], timeoutMs = GIT_TIMEOUT_MS): Promise<Outcome> {
   const ran = await $.process.run(['git', ...args], { timeoutMs })
   const isOk = ran.exitCode === 0
-  return { isOk, text: (isOk ? ran.stdout : ran.stderr || ran.stdout).trim() }
+  // trimEnd: porcelain lines start with a meaningful space (" M path").
+  return { isOk, text: (isOk ? ran.stdout : ran.stderr || ran.stdout).trimEnd() }
+}
+
+// Content hash of every dirty file, so a turn's edits are found however they were
+// made (Edit, Write, Bash, scripts) and survive a reload of this module.
+async function dirtySnapshot($: EngineInterface): Promise<Record<string, string>> {
+  const top = await git($, ['rev-parse', '--show-toplevel'])
+  if (!top.isOk) return {}
+  const root = top.text.trim()
+  const status = await git($, ['-C', root, 'status', '--porcelain', '-z', '-uall'])
+  if (!status.isOk) return {}
+  const entries = fmt.parsePorcelainZ(status.text)
+  const present = entries.filter(entry => !entry.isDeleted).map(entry => entry.path)
+  const hashed = present.length
+    ? await $.process.run(['git', '-C', root, 'hash-object', '--stdin-paths'], {
+        stdin: present.join('\n') + '\n',
+        timeoutMs: GIT_TIMEOUT_MS,
+      })
+    : undefined
+  const hashes = hashed?.exitCode === 0 ? hashed.stdout.trim().split('\n') : []
+  const snapshot: Record<string, string> = {}
+  for (const entry of entries) {
+    snapshot[`${root}/${entry.path}`] = entry.isDeleted ? 'deleted' : (hashes[present.indexOf(entry.path)] ?? '?')
+  }
+  return snapshot
 }
 
 async function pendingFiles($: EngineInterface, files: string[]): Promise<string[]> {
@@ -411,6 +440,7 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
         <Input
           key="labels"
           label="Labels to append (comma-separated)"
+          placeholder="e.g. backend, release-notes"
           value={config.labels.join(', ')}
           submitLabel="Save"
           onSubmit={value => void saveConfig($, { labels: value.split(',').map(l => l.trim()).filter(Boolean) })}
@@ -519,7 +549,7 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
       <Input
         key="ticket"
         label="Ticket"
-        placeholder="PBN-1234"
+        placeholder="PROJ-1234"
         value={ticket ?? ''}
         submitLabel="Set"
         onSubmit={value => void setTicket($, value.trim().toUpperCase() || null)}
@@ -551,11 +581,6 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
 // --- hooks -----------------------------------------------------------------
 
 export const register: Register = on => {
-  // Module-level tracking; a hot reload only loses edits made mid-turn.
-  const touched = new Set<string>()
-  let editedThisTurn = false
-  let isComposerTurn = false
-
   on('session.start', async ($, e, next) => {
     const stored = (await $.store.get(STORE_CONFIG)) as Partial<DevflowConfig> | undefined
     await setConfig($, { ...DEFAULT_CONFIG, ...stored })
@@ -572,10 +597,10 @@ export const register: Register = on => {
   })
 
   on('prompt.submit', async ($, e, next) => {
-    isComposerTurn = e.origin.kind === 'composer'
-    editedThisTurn = false
-    const ticket = isComposerTurn ? TICKET_RE.exec(e.text)?.[1] : undefined
+    const isComposer = e.origin.kind === 'composer'
+    const ticket = isComposer ? TICKET_RE.exec(e.text)?.[1] : undefined
     if (ticket) await setTicket($, ticket)
+    await setBaseline($, { isComposer, hashes: await dirtySnapshot($) })
     return next(e)
   })
 
@@ -584,12 +609,7 @@ export const register: Register = on => {
     const input = e as { file_path?: unknown; notebook_path?: unknown }
     const path = input.file_path ?? input.notebook_path
     if (typeof path !== 'string' || ran.deny !== undefined || ran.isError) return ran
-    if (PLAN_FILE_RE.test(path)) {
-      await patchPlan($, { path })
-    } else {
-      touched.add(path)
-      editedThisTurn = true
-    }
+    if (PLAN_FILE_RE.test(path)) await patchPlan($, { path })
     return ran
   }).catch(($, e, next) => next(e))
 
@@ -603,14 +623,15 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId) return next(e)
     const { answer } = e
-    const hadEdits = editedThisTurn
-    const wasComposer = isComposerTurn
-    const files = [...touched]
-    touched.clear()
     void (async () => {
+      const baseline = await getBaseline($)
+      await setBaseline($, null)
       await refreshUsage($)
+      if (!baseline) return
+      const files = fmt.changedSince(baseline.hashes, await dirtySnapshot($))
+      const hadEdits = files.length > 0
       const ticket = await getTicket($)
-      if (wasComposer && !hadEdits && ticket && answer.length >= MIN_FINDINGS_CHARS) {
+      if (baseline.isComposer && !hadEdits && ticket && answer.length >= MIN_FINDINGS_CHARS) {
         await setFindings($, { ticket, text: answer, isShared: false })
       }
       if (!hadEdits) return
