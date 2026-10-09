@@ -51,7 +51,21 @@ claude plugin marketplace add antanvir/claude-code-jira-devflow
 claude plugin install jira-devflow@devflow
 ```
 
-Update later with `claude plugin marketplace update devflow`, then start a new session.
+### Updating
+
+After a new version is pushed, run from a terminal:
+
+```
+claude plugin marketplace update devflow
+claude plugin update jira-devflow@devflow
+```
+
+Then start a new session (VSCode: open a new Claude tab or run **Developer: Reload Window**); a running session keeps the old version. Check with `claude plugin list`. If the old version is still listed, reinstall:
+
+```
+claude plugin uninstall jira-devflow@devflow
+claude plugin install jira-devflow@devflow
+```
 
 ## Development
 
