@@ -484,20 +484,33 @@ async function startReview($: EngineInterface): Promise<void> {
 
 // Copies the plan to "<TICKET>-<name>.md" beside it; the original stays,
 // because plan mode keeps reading its own path.
-async function afterPlanExit($: EngineInterface): Promise<void> {
+// ExitPlanMode's own result names the plan file; the Write hook path is the fallback.
+async function afterPlanExit($: EngineInterface, filePath?: string, planText?: string | null): Promise<void> {
   const plan = await getPlan($)
   const ticket = await getTicket($)
-  if (!plan.path) return
-  const text = String(await $.fs.read(plan.path))
+  const path = filePath || plan.path
+  if (!path) {
+    if (plan.postToJira) await notify($, 'Plan not posted: no plan file found')
+    return
+  }
+  const text = planText || String(await $.fs.read(path))
   const reply = await $.model.complete({ model: UTILITY_MODEL, maxTokens: 30, prompt: fmt.planNamePrompt(text) })
   const name = (reply.isAnswered && fmt.slugify(reply.text)) || fmt.headingSlug(text)
-  const renamedPath = fmt.namedPlanPath(plan.path, ticket, name)
+  const renamedPath = fmt.namedPlanPath(path, ticket, name)
   await $.fs.write(renamedPath, text)
-  await patchPlan($, { renamedPath })
-  if (plan.postToJira && ticket) {
-    const posted = await addComment($, ticket, text)
-    await notify($, posted.isOk ? `Plan added to ${ticket}` : `Plan comment failed: ${posted.text}`)
-  }
+  await patchPlan($, { path, renamedPath })
+  if (plan.postToJira) await postPlan($)
+}
+
+async function postPlan($: EngineInterface): Promise<void> {
+  const plan = await getPlan($)
+  const ticket = await getTicket($)
+  const path = plan.renamedPath ?? plan.path
+  if (!ticket) return notify($, 'Plan not posted: set a ticket first')
+  if (!path) return notify($, 'No plan yet: exit plan mode first')
+  await notify($, `Posting plan to ${ticket}…`)
+  const posted = await addComment($, ticket, String(await $.fs.read(path)))
+  await notify($, posted.isOk ? `Plan added to ${ticket}` : `Plan comment failed: ${posted.text}`)
 }
 
 // --- pane ------------------------------------------------------------------
@@ -730,11 +743,12 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
       {group('g-plan', 'PLAN', [
         <Button
           key="plan-jira"
-          label={`${check(plan.postToJira)} Add plan (.md) as a Jira comment`}
+          label={`${check(plan.postToJira)} Auto-post plan as a Jira comment on exiting plan mode`}
           plain
           onPress={() => void patchPlan($, { postToJira: !plan.postToJira })}
         />,
         plan.renamedPath ? <Text key="plan-path" dimColor wrap="truncate-start">{`Saved as ${plan.renamedPath}`}</Text> : null,
+        plan.path ? row('plan-actions', [action('plan-post', 'Post plan to Jira', () => postPlan($))]) : null,
       ].filter(Boolean) as RenderElement[])}
       {noticeRow}
       {findingsGroup}
@@ -870,7 +884,8 @@ export const register: Register = on => {
   // Runs after the plan dialog is answered, whichever option was picked.
   on('tool.call', { tool: 'ExitPlanMode' }, async ($, e, next) => {
     const ran = await next(e)
-    void afterPlanExit($)
+    const out = ran.deny === undefined ? (ran.result as { plan?: string | null; filePath?: string } | undefined) : undefined
+    void afterPlanExit($, out?.filePath, out?.plan)
     return ran
   }).catch(($, e, next) => next(e))
 
