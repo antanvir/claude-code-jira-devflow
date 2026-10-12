@@ -161,6 +161,165 @@ export function namedPlanPath(path: string, ticket: string | null, name: string)
   return `${dir}/${prefix}${name}.md`
 }
 
+// --- workflow --------------------------------------------------------------
+
+export type Transition = { id: string; name: string; to: string; category: string }
+export type IssueStatus = { status: string; category: string }
+
+const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
+
+export const projectKey = (ticket: string) => ticket.split('-')[0] ?? ticket
+
+// Connector replies are JSON, sometimes wrapped in prose; null when none parses.
+export function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    const start = text.indexOf('{')
+    const end = text.lastIndexOf('}')
+    if (start < 0 || end <= start) return null
+    try {
+      return JSON.parse(text.slice(start, end + 1))
+    } catch {
+      return null
+    }
+  }
+}
+
+type Json = Record<string, unknown>
+const isObject = (value: unknown): value is Json => typeof value === 'object' && value !== null
+const str = (value: unknown) => (typeof value === 'string' ? value : '')
+
+// Depth-first visit of every object, so reply nesting can vary.
+function walk(value: unknown, visit: (node: Json) => void): void {
+  if (Array.isArray(value)) value.forEach(item => walk(item, visit))
+  else if (isObject(value)) {
+    visit(value)
+    Object.values(value).forEach(item => walk(item, visit))
+  }
+}
+
+const toStatus = (value: unknown): IssueStatus | undefined => {
+  if (!isObject(value) || !str(value.name)) return undefined
+  const category = isObject(value.statusCategory) ? str(value.statusCategory.key) : ''
+  return { status: str(value.name), category }
+}
+
+export function parseTransitions(text: string): Transition[] {
+  const found: Transition[] = []
+  walk(parseJson(text), node => {
+    if (!Array.isArray(node.transitions)) return
+    for (const t of node.transitions) {
+      const to = isObject(t) ? toStatus(t.to) : undefined
+      if (isObject(t) && to) found.push({ id: String(t.id), name: str(t.name), to: to.status, category: to.category })
+    }
+  })
+  return found
+}
+
+export function parseIssueStatus(text: string): IssueStatus | undefined {
+  let found: IssueStatus | undefined
+  walk(parseJson(text), node => {
+    if (!found && isObject(node.fields)) found = toStatus(node.fields.status)
+  })
+  return found
+}
+
+// Distinct status names across a JQL search reply.
+export function parseStatusNames(text: string): string[] {
+  const names = new Set<string>()
+  walk(parseJson(text), node => {
+    const status = isObject(node.fields) ? toStatus(node.fields.status) : undefined
+    if (status) names.add(status.status)
+  })
+  return [...names]
+}
+
+// Status moves in an issue changelog are transitions the workflow allows.
+export function parseChangelogEdges(text: string): Array<[string, string]> {
+  const edges: Array<[string, string]> = []
+  walk(parseJson(text), node => {
+    if (node.field === 'status' && str(node.fromString) && str(node.toString)) {
+      edges.push([str(node.fromString), str(node.toString)])
+    }
+  })
+  return edges
+}
+
+export function addEdges(edges: Record<string, string[]>, from: string, tos: readonly string[]): Record<string, string[]> {
+  const known = edges[from] ?? []
+  const added = tos.filter(to => !same(to, from) && !known.some(k => same(k, to)))
+  return added.length > 0 ? { ...edges, [from]: [...known, ...added] } : edges
+}
+
+export function mergeStatuses(known: readonly string[], found: readonly string[]): string[] {
+  return [...known, ...found.filter(name => !known.some(k => same(k, name)))]
+}
+
+// Shortest known route (BFS); [] when the target is not reachable on what was learned.
+export function findPath(edges: Record<string, string[]>, from: string, to: string): string[] {
+  const prev = new Map<string, string>([[from.toLowerCase(), '']])
+  const names = new Map<string, string>([[from.toLowerCase(), from]])
+  const queue = [from]
+  while (queue.length > 0) {
+    const current = queue.shift() as string
+    if (same(current, to)) {
+      const path: string[] = []
+      for (let key = current.toLowerCase(); key !== from.toLowerCase(); key = prev.get(key) as string) {
+        path.unshift(names.get(key) as string)
+      }
+      return path
+    }
+    const out = Object.entries(edges).find(([name]) => same(name, current))?.[1] ?? []
+    for (const next of out) {
+      if (prev.has(next.toLowerCase())) continue
+      prev.set(next.toLowerCase(), current.toLowerCase())
+      names.set(next.toLowerCase(), next)
+      queue.push(next)
+    }
+  }
+  return []
+}
+
+// Unexplored hops: in-progress first, done last (closing often blocks further moves).
+const EXPLORE_RANK: Record<string, number> = { indeterminate: 0, new: 1, done: 2 }
+
+// Next hop toward `target`: direct, else the shortest learned route, else explore an
+// unvisited status. undefined when every option was already visited.
+export function pickTransition(
+  available: readonly Transition[],
+  edges: Record<string, string[]>,
+  target: string,
+  visited: readonly string[],
+): Transition | undefined {
+  const direct = available.find(t => same(t.to, target))
+  if (direct) return direct
+  const fresh = available.filter(t => !visited.some(v => same(v, t.to)))
+  const routed = fresh
+    .map(t => ({ t, length: findPath(edges, t.to, target).length }))
+    .filter(r => r.length > 0)
+    .sort((a, b) => a.length - b.length)[0]
+  if (routed) return routed.t
+  const rank = (t: Transition) => EXPLORE_RANK[t.category] ?? 1
+  return [...fresh].sort((a, b) => rank(a) - rank(b))[0]
+}
+
+// Project statuses when known, keeping the saved choice selectable.
+export function statusOptions(project: readonly string[], saved: string, fallback: readonly string[]): string[] {
+  const base = project.length > 0 ? project : fallback
+  return saved && !base.some(name => same(name, saved)) ? [saved, ...base] : [...base]
+}
+
+export function statusLabel(statuses: { project: string; isLoading: boolean } | null): string {
+  if (!statuses) return 'Status'
+  return `Status (${statuses.project}${statuses.isLoading ? ', loading…' : ''})`
+}
+
+// Parts still needing the skill once status is handled by the mod.
+export function hasSkillParts(config: DevflowConfig): boolean {
+  return config.updateParts.includes('developedBy') || (config.updateParts.includes('labels') && config.labels.length > 0)
+}
+
 // --- prompts the mod submits ----------------------------------------------
 
 // Status/field/label changes vary per Jira project, so the model does them through

@@ -11,10 +11,12 @@ import type {
   Meter,
   PaneSection,
   PlanInfo,
+  ProjectStatuses,
   ReviewChoice,
   TurnBaseline,
   UpdatePart,
   UsageSnapshot,
+  Workflow,
 } from '../types'
 import {
   ATLASSIAN_PREFIX,
@@ -27,6 +29,7 @@ import {
   GROUP_BORDER,
   GROUP_BORDER_HOVER,
   JIRA_COLOR,
+  MAX_TRANSITION_STEPS,
   MIN_FINDINGS_CHARS,
   PANE_ID,
   PANE_TITLE,
@@ -35,9 +38,11 @@ import {
   REVIEW_EFFORTS,
   REVIEW_MODELS,
   STATUS_OPTIONS,
+  STATUS_SAMPLE_SIZE,
   STORE_CLOUD_ID,
   STORE_CONFIG,
   STORE_REPO_CONFIG_PREFIX,
+  STORE_WORKFLOW_PREFIX,
   TICKET_RE,
   USAGE_REFRESH_MS,
   UTILITY_MODEL,
@@ -54,6 +59,7 @@ const IDLE_COMMIT: CommitCard = { files: [], message: '', phase: 'idle' }
 // `plugin`/`key` literal at its $.state call, so refs are never passed around.
 
 const TICKET = { plugin: 'jira-devflow', key: 'ticket' } as const
+const STATUSES = { plugin: 'jira-devflow', key: 'statuses' } as const
 const CONFIG = { plugin: 'jira-devflow', key: 'config' } as const
 const USAGE = { plugin: 'jira-devflow', key: 'usage' } as const
 const COMMIT = { plugin: 'jira-devflow', key: 'commit' } as const
@@ -67,7 +73,8 @@ const BASELINE = { plugin: 'jira-devflow', key: 'baseline' } as const
 const BAND = { plugin: 'jira-devflow', key: 'band' } as const
 
 const getTicket = async ($: EngineInterface) => (await $.state.get(TICKET)).value ?? null
-const setTicket = ($: EngineInterface, value: string | null) => $.state.set(TICKET, value)
+const getStatuses = async ($: EngineInterface) => (await $.state.get(STATUSES)).value ?? null
+const setStatuses = ($: EngineInterface, value: ProjectStatuses | null) => $.state.set(STATUSES, value)
 const getConfig = async ($: EngineInterface) => (await $.state.get(CONFIG)).value ?? DEFAULT_CONFIG
 const setConfig = ($: EngineInterface, value: DevflowConfig) => $.state.set(CONFIG, value)
 const getUsage = async ($: EngineInterface) => (await $.state.get(USAGE)).value ?? {}
@@ -88,6 +95,12 @@ const getNotice = async ($: EngineInterface) => (await $.state.get(NOTICE)).valu
 const getBaseline = async ($: EngineInterface) => (await $.state.get(BASELINE)).value ?? null
 const setBaseline = ($: EngineInterface, value: TurnBaseline | null) => $.state.set(BASELINE, value)
 const getBand = async ($: EngineInterface) => (await $.state.get(BAND)).value ?? false
+
+async function setTicket($: EngineInterface, value: string | null): Promise<void> {
+  const previous = await getTicket($)
+  await $.state.set(TICKET, value)
+  if (value && value !== previous) void loadStatuses($, value)
+}
 
 async function notify($: EngineInterface, text: string | null): Promise<void> {
   await $.state.set(NOTICE, text)
@@ -217,6 +230,85 @@ async function addComment($: EngineInterface, ticket: string, markdown: string):
   })
 }
 
+// --- workflow (status dropdown + multi-step transitions) ---------------------
+
+async function getWorkflow($: EngineInterface, project: string): Promise<Workflow> {
+  const saved = (await $.store.get(STORE_WORKFLOW_PREFIX + project)) as Workflow | undefined
+  return saved ?? { statuses: [], edges: {} }
+}
+
+async function saveWorkflow($: EngineInterface, project: string, workflow: Workflow): Promise<void> {
+  await $.store.set(STORE_WORKFLOW_PREFIX + project, workflow)
+}
+
+async function showStatuses($: EngineInterface, project: string, statuses: string[], isLoading: boolean): Promise<void> {
+  const ticket = await getTicket($)
+  if (ticket && fmt.projectKey(ticket) === project) await setStatuses($, { project, statuses, isLoading })
+}
+
+// Cached list shows at once; refreshed from recent project issues, the ticket's
+// transitions and its changelog (which also teaches the workflow edges).
+async function loadStatuses($: EngineInterface, ticket: string): Promise<void> {
+  const project = fmt.projectKey(ticket)
+  const cached = await getWorkflow($, project)
+  await showStatuses($, project, cached.statuses, true)
+  const id = await cloudId($)
+  if (!id) return showStatuses($, project, cached.statuses, false)
+  const [search, issue, transitions] = await Promise.all([
+    callAtlassian($, 'searchJiraIssuesUsingJql', {
+      cloudId: id,
+      jql: `project = "${project}" ORDER BY updated DESC`,
+      fields: ['status'],
+      maxResults: STATUS_SAMPLE_SIZE,
+    }),
+    callAtlassian($, 'getJiraIssue', { cloudId: id, issueIdOrKey: ticket, fields: ['status'], expand: 'changelog' }),
+    callAtlassian($, 'getTransitionsForJiraIssue', { cloudId: id, issueIdOrKey: ticket }),
+  ])
+  const current = issue.isOk ? fmt.parseIssueStatus(issue.text) : undefined
+  const targets = transitions.isOk ? fmt.parseTransitions(transitions.text).map(t => t.to) : []
+  let workflow = await getWorkflow($, project)
+  for (const [from, to] of issue.isOk ? fmt.parseChangelogEdges(issue.text) : []) {
+    workflow = { ...workflow, edges: fmt.addEdges(workflow.edges, from, [to]) }
+  }
+  if (current) workflow = { ...workflow, edges: fmt.addEdges(workflow.edges, current.status, targets) }
+  const found = [...(search.isOk ? fmt.parseStatusNames(search.text) : []), ...(current ? [current.status] : []), ...targets]
+  workflow = { ...workflow, statuses: fmt.mergeStatuses(workflow.statuses, found) }
+  await saveWorkflow($, project, workflow)
+  await showStatuses($, project, workflow.statuses, false)
+}
+
+// Walks transitions one at a time until the ticket reaches `target`, learning edges
+// as it goes; Jira only exposes the transitions out of the current status.
+async function moveToStatus($: EngineInterface, ticket: string, target: string): Promise<Outcome> {
+  const id = await cloudId($)
+  if (!id) return { isOk: false, text: 'No Atlassian site found' }
+  const project = fmt.projectKey(ticket)
+  const issue = await callAtlassian($, 'getJiraIssue', { cloudId: id, issueIdOrKey: ticket, fields: ['status'] })
+  let current = issue.isOk ? fmt.parseIssueStatus(issue.text) : undefined
+  if (!current) return { isOk: false, text: issue.isOk ? `${ticket}: status unreadable` : issue.text }
+  const start = current.status
+  if (current.status.toLowerCase() === target.toLowerCase()) return { isOk: true, text: `${ticket} already in ${target}` }
+  const visited = [current.status]
+  let workflow = await getWorkflow($, project)
+  for (let step = 0; step < MAX_TRANSITION_STEPS; step++) {
+    const listed = await callAtlassian($, 'getTransitionsForJiraIssue', { cloudId: id, issueIdOrKey: ticket })
+    if (!listed.isOk) return { isOk: false, text: listed.text }
+    const available = fmt.parseTransitions(listed.text)
+    workflow = { ...workflow, edges: fmt.addEdges(workflow.edges, current.status, available.map(t => t.to)) }
+    await saveWorkflow($, project, workflow)
+    const next = fmt.pickTransition(available, workflow.edges, target, visited)
+    if (!next) break
+    await notify($, `${ticket}: ${current.status} → ${next.to}…`)
+    const moved = await callAtlassian($, 'transitionJiraIssue', { cloudId: id, issueIdOrKey: ticket, transition: { id: next.id } })
+    if (!moved.isOk) return { isOk: false, text: `${ticket}: ${current.status} → ${next.to} failed: ${moved.text}` }
+    current = { status: next.to, category: next.category }
+    visited.push(next.to)
+    if (next.to.toLowerCase() === target.toLowerCase()) return { isOk: true, text: `${ticket}: ${visited.join(' → ')}` }
+  }
+  const moved = visited.length > 1 ? ` (moved ${visited.join(' → ')})` : ''
+  return { isOk: false, text: `${ticket}: no route from ${start} to ${target} found${moved}` }
+}
+
 async function verifyConnector($: EngineInterface): Promise<void> {
   const config = await getConfig($)
   if (!(await isConnectorAvailable($))) {
@@ -249,12 +341,20 @@ async function requireTicket($: EngineInterface): Promise<{ ticket: string; conf
   return { ticket, config }
 }
 
+// Status runs here (deterministic, multi-step); other fields go through the skill.
 async function updateTicket($: EngineInterface): Promise<void> {
   await commitDrafts($)
   const ready = await requireTicket($)
   if (!ready) return
   await setSection($, 'update', false)
-  void $.prompt.submit({ text: fmt.updateTicketPrompt(ready.ticket, ready.config) })
+  const { ticket, config } = ready
+  if (config.updateParts.includes('status')) {
+    const moved = await moveToStatus($, ticket, config.status)
+    await notify($, moved.text)
+    void loadStatuses($, ticket)
+  }
+  const rest = { ...config, updateParts: config.updateParts.filter(part => part !== 'status') }
+  if (fmt.hasSkillParts(rest)) void $.prompt.submit({ text: fmt.updateTicketPrompt(ticket, rest) })
 }
 
 async function writeAc($: EngineInterface): Promise<void> {
@@ -424,6 +524,8 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
   const open = await getOpen($)
   const drafts = await getDrafts($)
   const notice = await getNotice($)
+  const statuses = await getStatuses($)
+  const projectStatuses = ticket && statuses?.project === fmt.projectKey(ticket) ? statuses : null
 
   if (e.surface === 'mobile') {
     const { Text } = $.ui.resolve(e)
@@ -510,8 +612,8 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
       </Box>
       <Select
         key="status"
-        label="Status"
-        options={fmt.toOptions(STATUS_OPTIONS)}
+        label={fmt.statusLabel(projectStatuses)}
+        options={fmt.toOptions(fmt.statusOptions(projectStatuses?.statuses ?? [], config.status, STATUS_OPTIONS))}
         value={config.status}
         onSelect={value => void saveConfig($, { status: value })}
       />
@@ -734,6 +836,8 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await setConfig($, await loadConfig($))
+    const ticket = await getTicket($)
+    if (ticket) void loadStatuses($, ticket)
     await $.command.register({ name: COMMAND, description: 'Open the Jira Devflow panel' })
     $.clock.every(USAGE_REFRESH_MS, () => void refreshUsage($))
     void refreshUsage($)

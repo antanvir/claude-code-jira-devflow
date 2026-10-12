@@ -19,7 +19,7 @@ Change nothing that is not listed: no assignee, fix version, sprint or other fie
    - If the ticket is already in that status (case-insensitive), skip.
    - Get transitions with `getTransitionsForJiraIssue`. Pick the transition whose **target status name** equals the requested name (case-insensitive); else one whose name contains it.
    - Match on the status **name**, never the status category ("Awaiting Feedback" is not "In Progress").
-   - If none matches, do not transition. Report the available target statuses.
+   - If none matches, the target needs intermediate steps: take the transition that best leads toward it (prefer in-progress statuses, avoid done ones unless that is the target), then re-fetch transitions and repeat, never revisiting a status, at most 6 hops. If it still cannot be reached, stop and report the path taken and the available target statuses.
    - Apply with `transitionJiraIssue`.
 
 3. **Developed by** (if requested)

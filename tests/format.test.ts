@@ -82,3 +82,27 @@ test('labels and commit subject/body round-trip through single-line inputs', asy
   expect(fmt.joinMessage('PROJ-1: Fix fee', 'Add tests')).toBe('PROJ-1: Fix fee\nAdd tests')
   expect(fmt.joinMessage('PROJ-1: Fix fee', ' ')).toBe('PROJ-1: Fix fee')
 })
+
+test('project statuses and transitions parse from connector JSON', async () => {
+  const search = JSON.stringify({ issues: [{ fields: { status: { name: 'To Do' } } }, { fields: { status: { name: 'Dev Review' } } }] })
+  expect(fmt.parseStatusNames(search)).toEqual(['To Do', 'Dev Review'])
+  const listed = `Result: ${JSON.stringify({ transitions: [{ id: 11, name: 'Start', to: { name: 'In Dev', statusCategory: { key: 'indeterminate' } } }] })}`
+  expect(fmt.parseTransitions(listed)).toEqual([{ id: '11', name: 'Start', to: 'In Dev', category: 'indeterminate' }])
+  const log = JSON.stringify({ changelog: { histories: [{ items: [{ field: 'status', fromString: 'To Do', toString: 'In Dev' }] }] } })
+  expect(fmt.parseChangelogEdges(log)).toEqual([['To Do', 'In Dev']])
+})
+
+test('multi-step transitions follow the learned route, else explore', async () => {
+  const edges = { 'To Do': ['In Dev'], 'In Dev': ['Code Review'], 'Code Review': ['QA'] }
+  expect(fmt.findPath(edges, 'To Do', 'qa')).toEqual(['In Dev', 'Code Review', 'QA'])
+  const t = (to: string, category = 'indeterminate') => ({ id: to, name: to, to, category })
+  expect(fmt.pickTransition([t('Done', 'done'), t('In Dev')], edges, 'QA', ['To Do'])?.to).toBe('In Dev')
+  expect(fmt.pickTransition([t('Done', 'done'), t('Blocked')], {}, 'QA', ['To Do'])?.to).toBe('Blocked')
+  expect(fmt.pickTransition([t('To Do')], {}, 'QA', ['To Do'])).toBe(undefined)
+})
+
+test('status dropdown uses project statuses and keeps the saved one', async () => {
+  expect(fmt.statusOptions(['To Do', 'QA'], 'qa', ['X'])).toEqual(['To Do', 'QA'])
+  expect(fmt.statusOptions(['To Do'], 'Ready for QA', ['X'])).toEqual(['Ready for QA', 'To Do'])
+  expect(fmt.statusOptions([], 'X', ['X', 'Y'])).toEqual(['X', 'Y'])
+})

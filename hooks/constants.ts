@@ -29,6 +29,8 @@ export const STORE_CONFIG = 'config'
 export const STORE_REPO_CONFIG_PREFIX = 'config:'
 export const GLOBAL_CONFIG_FIELDS = ['email'] as const
 export const STORE_CLOUD_ID = 'cloudId'
+// Per Jira project: status names seen and the workflow edges learned so far.
+export const STORE_WORKFLOW_PREFIX = 'workflow:'
 
 export const DEFAULT_CONFIG: DevflowConfig = {
   email: '',
@@ -38,7 +40,12 @@ export const DEFAULT_CONFIG: DevflowConfig = {
   updateParts: ['status', 'developedBy', 'labels'],
 }
 
+// Shown until the ticket's project statuses are fetched.
 export const STATUS_OPTIONS = ['In Progress', 'Code Review', 'Ready for QA', 'Done']
+// Recent issues sampled to list a project's statuses (the connector has no workflow API).
+export const STATUS_SAMPLE_SIZE = 100
+// Hops allowed when no direct transition reaches the requested status.
+export const MAX_TRANSITION_STEPS = 6
 export const REVIEW_MODELS = ['opus', 'sonnet', 'fable', 'haiku']
 export const REVIEW_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 

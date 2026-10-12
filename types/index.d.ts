@@ -25,6 +25,11 @@ export type CommitCard = {
   note?: string
 }
 
+// One Jira project's known statuses and the transitions seen between them.
+export type Workflow = { statuses: string[]; edges: Record<string, string[]> }
+
+export type ProjectStatuses = { project: string; statuses: string[]; isLoading: boolean }
+
 export type Findings = { ticket: string; text: string; isShared: boolean }
 
 export type PlanInfo = { path?: string; renamedPath?: string; postToJira: boolean }
@@ -45,6 +50,7 @@ declare module 'claude-code' {
   interface PluginState {
     'jira-devflow': {
       ticket: string | null
+      statuses: ProjectStatuses | null
       config: DevflowConfig
       usage: UsageSnapshot
       commit: CommitCard
