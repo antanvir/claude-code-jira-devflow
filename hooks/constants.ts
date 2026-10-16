@@ -53,4 +53,8 @@ export const JIRA_COLOR = '#4c9aff'
 // Group frames: dashed at rest, accent on hover (theme keys).
 export const GROUP_BORDER = 'subtle'
 export const GROUP_BORDER_HOVER = 'suggestion'
-export const BAR_CELLS = 8
+export const BAR_CELLS = 6
+// Below this many columns the band uses short bars and an icon-only Compact button.
+export const BAND_NARROW_COLUMNS = 72
+export const BAR_CELLS_NARROW = 4
+export const COMPACT_ICON = '⇲'

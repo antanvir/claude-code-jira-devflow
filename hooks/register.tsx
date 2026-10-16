@@ -24,7 +24,10 @@ import {
   COMMAND,
   CONNECTORS_URL,
   DEFAULT_CONFIG,
+  BAND_NARROW_COLUMNS,
   BAR_CELLS,
+  BAR_CELLS_NARROW,
+  COMPACT_ICON,
   EDIT_TOOL_RE,
   GIT_TIMEOUT_MS,
   GROUP_BORDER,
@@ -811,6 +814,8 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
   const usage = await getUsage($)
   const isFallback = await getBand($)
   const { Box, Text, Button } = $.ui.resolve(e)
+  const isNarrow = (e.viewport?.columns ?? Infinity) < BAND_NARROW_COLUMNS
+  const barCells = isNarrow ? BAR_CELLS_NARROW : BAR_CELLS
 
   const action = (key: string, label: string, onPress: () => Promise<unknown>, isPrimary = false) => (
     <Button key={key} label={label} variant={isPrimary ? 'primary' : 'secondary'} onPress={() => void onPress()} />
@@ -819,19 +824,19 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
     <Box key={`meter-${name}`} flexDirection="row" gap={1}>
       <Text dimColor>{name}</Text>
       {m ? (
-        <Text color={fmt.levelColor(m.percent)}>{`${fmt.bar(m.percent, BAR_CELLS)} ${m.label}`}</Text>
+        <Text color={fmt.levelColor(m.percent)}>{`${fmt.bar(m.percent, barCells)} ${m.label}`}</Text>
       ) : (
         <Text dimColor>n/a</Text>
       )}
     </Box>
   )
   const meters = (
-    <Box key="band-meters" flexDirection="row" flexWrap="wrap" columnGap={3} alignItems="center">
+    <Box key="band-meters" flexDirection="row" flexWrap="wrap" columnGap={isNarrow ? 2 : 3} alignItems="center">
       {meter('5h', usage.fiveHour)}
       {meter('Weekly', usage.weekly)}
       {meter('Context', usage.context)}
       <Box flexDirection="row" gap={1}>
-        {action('band-compact', 'Compact', () => compact($))}
+        {action('band-compact', isNarrow ? COMPACT_ICON : 'Compact', () => compact($))}
         <Button key="band-refresh" label="↻" plain dimColor onPress={() => void refreshUsage($)} />
       </Box>
     </Box>
