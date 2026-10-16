@@ -146,6 +146,14 @@ async function openPane($: EngineInterface): Promise<boolean> {
   return opened.isPlaced
 }
 
+// Reopening after a close (or a minimize) always shows the full pane.
+async function showPane($: EngineInterface): Promise<boolean> {
+  await setSection($, 'minimized', false)
+  return openPane($)
+}
+
+const isPaneUp = async ($: EngineInterface) => (await $.ui.panes()).some(pane => pane.id === PANE_ID && pane.isPlaced)
+
 async function patchCommit($: EngineInterface, patch: Partial<CommitCard>): Promise<void> {
   await setCommit($, { ...(await getCommit($)), ...patch })
 }
@@ -826,6 +834,7 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
   const commit = await getCommit($)
   const findings = await getFindings($)
   const notice = await getNotice($)
+  const canReopen = !(await isPaneUp($))
   const isAfterCommit = commit.phase === 'pushed' || commit.phase === 'committed'
   // A title line over a button bar; each button grows to share the width and wraps when narrow.
   const card = (key: string, title: RenderElement, meta: string | null, buttons: RenderElement[]) => (
@@ -886,6 +895,7 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
       {card('band-ticket', <Text key="t" color={JIRA_COLOR} bold>{ticket ?? 'No ticket'}</Text>, null, [
         action('band-update', 'Update ticket', () => updateTicket($)),
         action('band-ac', 'Write AC', () => writeAc($)),
+        ...(canReopen ? [action('band-open', 'Open panel', () => showPane($))] : []),
       ])}
       {meters}
     </Box>
@@ -906,8 +916,18 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // The person's × minimizes first; a × on the minimized pane really closes it.
+  on('ui.close', { id: PANE_ID }, async ($, e, next) => {
+    if (e.origin.kind === 'person' && !(await getOpen($)).includes('minimized')) {
+      await setSection($, 'minimized', true)
+      return { value: undefined }
+    }
+    await $.state.set(BAND, true)
+    return next(e)
+  })
+
   on('command.run', { command: COMMAND }, async $ => {
-    const isPlaced = await openPane($)
+    const isPlaced = await showPane($)
     return { text: isPlaced ? 'Jira Devflow panel opened.' : 'Jira Devflow shown above the prompt (this surface has no panes).' }
   })
 
