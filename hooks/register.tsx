@@ -75,7 +75,7 @@ const DRAFTS = { plugin: 'jira-devflow', key: 'drafts' } as const
 const REVS = { plugin: 'jira-devflow', key: 'revs' } as const
 const NOTICE = { plugin: 'jira-devflow', key: 'notice' } as const
 const BASELINE = { plugin: 'jira-devflow', key: 'baseline' } as const
-const BAND = { plugin: 'jira-devflow', key: 'band' } as const
+const PLACEMENT = { plugin: 'jira-devflow', key: 'placement' } as const
 
 const getTicket = async ($: EngineInterface) => (await $.state.get(TICKET)).value ?? null
 const getStatuses = async ($: EngineInterface) => (await $.state.get(STATUSES)).value ?? null
@@ -101,7 +101,7 @@ const setRevs = ($: EngineInterface, value: SaveRevs) => $.state.set(REVS, value
 const getNotice = async ($: EngineInterface) => (await $.state.get(NOTICE)).value ?? null
 const getBaseline = async ($: EngineInterface) => (await $.state.get(BASELINE)).value ?? null
 const setBaseline = ($: EngineInterface, value: TurnBaseline | null) => $.state.set(BASELINE, value)
-const getBand = async ($: EngineInterface) => (await $.state.get(BAND)).value ?? false
+const getPlacement = async ($: EngineInterface) => (await $.state.get(PLACEMENT)).value ?? null
 
 async function setTicket($: EngineInterface, value: string | null): Promise<void> {
   const previous = await getTicket($)
@@ -152,7 +152,6 @@ async function commitDrafts($: EngineInterface, only?: DraftField): Promise<void
 // Surfaces that place no panes (VS Code) answer isPlaced: false; the band stands in.
 async function openPane($: EngineInterface): Promise<boolean> {
   const opened = await $.ui.open({ id: PANE_ID, title: PANE_TITLE })
-  await $.state.set(BAND, !opened.isPlaced)
   return opened.isPlaced
 }
 
@@ -559,6 +558,8 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
   const statuses = await getStatuses($)
   const projectStatuses = ticket && statuses?.project === fmt.projectKey(ticket) ? statuses : null
 
+  if ((await getPlacement($)) !== e.props.placement) await $.state.set(PLACEMENT, e.props.placement)
+
   if (e.surface === 'mobile') {
     const { Text } = $.ui.resolve(e)
     return <Text>{ticket ?? 'No ticket'} · open on desktop or VSCode for actions</Text>
@@ -807,12 +808,15 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
 }
 
 // --- band above the prompt --------------------------------------------------
-// Usage meters always (every surface, every session); ticket/commit rows only
-// where no pane was placed.
+// Usage meters always (every surface, every session); ticket/commit rows unless
+// the pane is up and expanded inline above the prompt.
 
 async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Promise<RenderElement> {
   const usage = await getUsage($)
-  const isFallback = await getBand($)
+  const canReopen = !(await isPaneUp($))
+  // An expanded inline pane already holds these cards; a docked, minimized or closed one doesn't.
+  const isMinimized = (await getOpen($)).includes('minimized')
+  const showsCards = canReopen || isMinimized || (await getPlacement($)) === 'dock'
   const { Box, Text, Button } = $.ui.resolve(e)
   const isNarrow = (e.viewport?.columns ?? Infinity) < BAND_NARROW_COLUMNS
   const barCells = isNarrow ? BAR_CELLS_NARROW : BAR_CELLS
@@ -841,13 +845,12 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
       </Box>
     </Box>
   )
-  if (!isFallback) return <Box flexDirection="column" width="100%">{meters}</Box>
+  if (!showsCards) return <Box flexDirection="column" width="100%">{meters}</Box>
 
   const ticket = await getTicket($)
   const commit = await getCommit($)
   const findings = await getFindings($)
   const notice = await getNotice($)
-  const canReopen = !(await isPaneUp($))
   const isAfterCommit = commit.phase === 'pushed' || commit.phase === 'committed'
   // A title line over a button bar; each button grows to share the width and wraps when narrow.
   const card = (key: string, title: RenderElement, meta: string | null, buttons: RenderElement[]) => (
@@ -935,7 +938,8 @@ export const register: Register = on => {
       await setSection($, 'minimized', true)
       return { value: undefined }
     }
-    await $.state.set(BAND, true)
+    // A state write redraws the band, which then shows its cards again.
+    await $.state.set(PLACEMENT, null)
     return next(e)
   })
 

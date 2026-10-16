@@ -64,8 +64,8 @@ declare module 'claude-code' {
       revs: SaveRevs
       notice: string | null
       baseline: TurnBaseline | null
-      // True when no attached surface placed the pane (e.g. VS Code): draw the band.
-      band: boolean
+      // Where the pane was last drawn; inline (above the prompt) hides the band's duplicate cards.
+      placement: 'dock' | 'inline' | null
     }
   }
 }
