@@ -13,6 +13,7 @@ import type {
   PlanInfo,
   ProjectStatuses,
   ReviewChoice,
+  SaveRevs,
   TurnBaseline,
   UpdatePart,
   UsageSnapshot,
@@ -68,6 +69,7 @@ const PLAN = { plugin: 'jira-devflow', key: 'plan' } as const
 const REVIEW = { plugin: 'jira-devflow', key: 'review' } as const
 const OPEN = { plugin: 'jira-devflow', key: 'open' } as const
 const DRAFTS = { plugin: 'jira-devflow', key: 'drafts' } as const
+const REVS = { plugin: 'jira-devflow', key: 'revs' } as const
 const NOTICE = { plugin: 'jira-devflow', key: 'notice' } as const
 const BASELINE = { plugin: 'jira-devflow', key: 'baseline' } as const
 const BAND = { plugin: 'jira-devflow', key: 'band' } as const
@@ -91,6 +93,8 @@ const getOpen = async ($: EngineInterface) => (await $.state.get(OPEN)).value ??
 const setOpen = ($: EngineInterface, value: PaneSection[]) => $.state.set(OPEN, value)
 const getDrafts = async ($: EngineInterface) => (await $.state.get(DRAFTS)).value ?? {}
 const setDrafts = ($: EngineInterface, value: Drafts) => $.state.set(DRAFTS, value)
+const getRevs = async ($: EngineInterface) => (await $.state.get(REVS)).value ?? {}
+const setRevs = ($: EngineInterface, value: SaveRevs) => $.state.set(REVS, value)
 const getNotice = async ($: EngineInterface) => (await $.state.get(NOTICE)).value ?? null
 const getBaseline = async ($: EngineInterface) => (await $.state.get(BASELINE)).value ?? null
 const setBaseline = ($: EngineInterface, value: TurnBaseline | null) => $.state.set(BASELINE, value)
@@ -137,6 +141,9 @@ async function commitDrafts($: EngineInterface, only?: DraftField): Promise<void
   const rest = { ...drafts }
   for (const field of fields) delete rest[field]
   await setDrafts($, rest)
+  // The host empties a field on Enter and skips redrawing an unchanged value; a new key forces it.
+  const revs = await getRevs($)
+  await setRevs($, { ...revs, ...Object.fromEntries(fields.map(f => [f, (revs[f] ?? 0) + 1])) })
 }
 
 // Surfaces that place no panes (VS Code) answer isPlaced: false; the band stands in.
@@ -544,6 +551,7 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
   const review = await getReview($)
   const open = await getOpen($)
   const drafts = await getDrafts($)
+  const revs = await getRevs($)
   const notice = await getNotice($)
   const statuses = await getStatuses($)
   const projectStatuses = ticket && statuses?.project === fmt.projectKey(ticket) ? statuses : null
@@ -591,7 +599,7 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
     return (
       <Box key={`field-${key}`} flexDirection="column">
         <Input
-          key={key}
+          key={`${key}-${revs[key] ?? 0}`}
           label={label}
           placeholder={placeholder}
           value={draft ?? saved}
@@ -644,7 +652,7 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
   const updateSection = isOpen('update') ? (
     <Box key="update-body" flexDirection="column" gap={1} borderStyle="single" borderColor={GROUP_BORDER} paddingX={1} paddingY={1}>
       <Text bold>{`Apply to ${ticket ?? 'ticket'}`}</Text>
-      <Box flexDirection="column">
+      <Box flexDirection="row" flexWrap="wrap" gap={1}>
         {(Object.keys(PART_LABELS) as UpdatePart[]).map(part => (
           <Button
             key={`part-${part}`}

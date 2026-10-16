@@ -45,6 +45,8 @@ export type PaneSection = 'update' | 'settings' | 'minimized'
 // Typed but unsaved field values; Apply or Save commits them.
 export type DraftField = 'email' | 'developedBy' | 'labels' | 'subject' | 'body'
 export type Drafts = Partial<Record<DraftField, string>>
+// Save count per field; part of the Input key so a save remounts it with the saved value.
+export type SaveRevs = Partial<Record<DraftField, number>>
 
 declare module 'claude-code' {
   interface PluginState {
@@ -59,6 +61,7 @@ declare module 'claude-code' {
       review: ReviewChoice
       open: PaneSection[]
       drafts: Drafts
+      revs: SaveRevs
       notice: string | null
       baseline: TurnBaseline | null
       // True when no attached surface placed the pane (e.g. VS Code): draw the band.
