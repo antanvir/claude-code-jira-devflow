@@ -39,8 +39,9 @@ export type ReviewChoice = { model: string; effort: string }
 // Dirty files (absolute path → blob hash) when the prompt was sent.
 export type TurnBaseline = { isComposer: boolean; hashes: Record<string, string> }
 
-// Collapsible pane sections; listed ones are expanded, except 'minimized' (the whole pane).
-export type PaneSection = 'update' | 'settings' | 'minimized'
+// Collapsible sections; listed ones are expanded, except 'minimized' (the whole pane)
+// and 'bandCollapsed' (the band's cards above the meters).
+export type PaneSection = 'update' | 'settings' | 'minimized' | 'bandCollapsed'
 
 // Typed but unsaved field values; Apply or Save commits them.
 export type DraftField = 'email' | 'developedBy' | 'labels' | 'subject' | 'body'

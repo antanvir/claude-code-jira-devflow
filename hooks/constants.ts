@@ -58,6 +58,6 @@ export const BAR_CELLS = 6
 export const BAND_NARROW_COLUMNS = 72
 export const BAR_CELLS_NARROW = 4
 export const COMPACT_ICON = '⇲'
-// Pane head toggle: up caret collapses the expanded pane, down caret expands it.
+// Pane head and band cards toggle: up caret collapses, down caret expands.
 export const PANE_MINIMIZE_ICON = '▴'
 export const PANE_EXPAND_ICON = '▾'

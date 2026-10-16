@@ -817,8 +817,9 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
   const canReopen = (await getPaneClosed($)) || !(await isPaneUp($))
   // An expanded inline pane already holds these cards; a docked, minimized or closed one doesn't.
   // Render hooks can't write state, so "docked" is the surface's own docks-a-pane flag.
-  const isMinimized = (await getOpen($)).includes('minimized')
-  const showsCards = canReopen || isMinimized || e.viewport?.isFullscreen === true
+  const open = await getOpen($)
+  const hasCards = canReopen || open.includes('minimized') || e.viewport?.isFullscreen === true
+  const isCollapsed = open.includes('bandCollapsed')
   const { Box, Text, Button } = $.ui.resolve(e)
   const isNarrow = (e.viewport?.columns ?? Infinity) < BAND_NARROW_COLUMNS
   const barCells = isNarrow ? BAR_CELLS_NARROW : BAR_CELLS
@@ -844,10 +845,19 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
       <Box flexDirection="row" gap={1}>
         {action('band-compact', isNarrow ? COMPACT_ICON : 'Compact', () => compact($))}
         <Button key="band-refresh" label="↻" plain dimColor onPress={() => void refreshUsage($)} />
+        {hasCards ? (
+          <Button
+            key="band-cards-toggle"
+            label={isCollapsed ? PANE_EXPAND_ICON : PANE_MINIMIZE_ICON}
+            plain
+            dimColor
+            onPress={() => void toggleSection($, 'bandCollapsed')}
+          />
+        ) : null}
       </Box>
     </Box>
   )
-  if (!showsCards) return <Box flexDirection="column" width="100%">{meters}</Box>
+  if (!hasCards || isCollapsed) return <Box flexDirection="column" width="100%">{meters}</Box>
 
   const ticket = await getTicket($)
   const commit = await getCommit($)
