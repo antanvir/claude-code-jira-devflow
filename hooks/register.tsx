@@ -35,7 +35,9 @@ import {
   JIRA_COLOR,
   MAX_TRANSITION_STEPS,
   MIN_FINDINGS_CHARS,
+  PANE_EXPAND_ICON,
   PANE_ID,
+  PANE_MINIMIZE_ICON,
   PANE_TITLE,
   PLAN_FILE_RE,
   PUSH_TIMEOUT_MS,
@@ -75,7 +77,7 @@ const DRAFTS = { plugin: 'jira-devflow', key: 'drafts' } as const
 const REVS = { plugin: 'jira-devflow', key: 'revs' } as const
 const NOTICE = { plugin: 'jira-devflow', key: 'notice' } as const
 const BASELINE = { plugin: 'jira-devflow', key: 'baseline' } as const
-const PLACEMENT = { plugin: 'jira-devflow', key: 'placement' } as const
+const PANE_CLOSED = { plugin: 'jira-devflow', key: 'paneClosed' } as const
 
 const getTicket = async ($: EngineInterface) => (await $.state.get(TICKET)).value ?? null
 const getStatuses = async ($: EngineInterface) => (await $.state.get(STATUSES)).value ?? null
@@ -101,7 +103,7 @@ const setRevs = ($: EngineInterface, value: SaveRevs) => $.state.set(REVS, value
 const getNotice = async ($: EngineInterface) => (await $.state.get(NOTICE)).value ?? null
 const getBaseline = async ($: EngineInterface) => (await $.state.get(BASELINE)).value ?? null
 const setBaseline = ($: EngineInterface, value: TurnBaseline | null) => $.state.set(BASELINE, value)
-const getPlacement = async ($: EngineInterface) => (await $.state.get(PLACEMENT)).value ?? null
+const getPaneClosed = async ($: EngineInterface) => (await $.state.get(PANE_CLOSED)).value ?? false
 
 async function setTicket($: EngineInterface, value: string | null): Promise<void> {
   const previous = await getTicket($)
@@ -152,6 +154,7 @@ async function commitDrafts($: EngineInterface, only?: DraftField): Promise<void
 // Surfaces that place no panes (VS Code) answer isPlaced: false; the band stands in.
 async function openPane($: EngineInterface): Promise<boolean> {
   const opened = await $.ui.open({ id: PANE_ID, title: PANE_TITLE })
+  await $.state.set(PANE_CLOSED, false)
   return opened.isPlaced
 }
 
@@ -558,8 +561,6 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
   const statuses = await getStatuses($)
   const projectStatuses = ticket && statuses?.project === fmt.projectKey(ticket) ? statuses : null
 
-  if ((await getPlacement($)) !== e.props.placement) await $.state.set(PLACEMENT, e.props.placement)
-
   if (e.surface === 'mobile') {
     const { Text } = $.ui.resolve(e)
     return <Text>{ticket ?? 'No ticket'} · open on desktop or VSCode for actions</Text>
@@ -630,7 +631,7 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
       {isMinimized ? <Text key="pane-ticket" color={JIRA_COLOR} bold>{ticket ?? 'No ticket'}</Text> : null}
       <Button
         key="pane-toggle"
-        label={isMinimized ? '▸ Expand' : '▾ Minimize'}
+        label={isMinimized ? PANE_EXPAND_ICON : PANE_MINIMIZE_ICON}
         plain
         dimColor
         onPress={() => void toggleSection($, 'minimized')}
@@ -813,10 +814,11 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
 
 async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Promise<RenderElement> {
   const usage = await getUsage($)
-  const canReopen = !(await isPaneUp($))
+  const canReopen = (await getPaneClosed($)) || !(await isPaneUp($))
   // An expanded inline pane already holds these cards; a docked, minimized or closed one doesn't.
+  // Render hooks can't write state, so "docked" is the surface's own docks-a-pane flag.
   const isMinimized = (await getOpen($)).includes('minimized')
-  const showsCards = canReopen || isMinimized || (await getPlacement($)) === 'dock'
+  const showsCards = canReopen || isMinimized || e.viewport?.isFullscreen === true
   const { Box, Text, Button } = $.ui.resolve(e)
   const isNarrow = (e.viewport?.columns ?? Infinity) < BAND_NARROW_COLUMNS
   const barCells = isNarrow ? BAR_CELLS_NARROW : BAR_CELLS
@@ -939,7 +941,7 @@ export const register: Register = on => {
       return { value: undefined }
     }
     // A state write redraws the band, which then shows its cards again.
-    await $.state.set(PLACEMENT, null)
+    await $.state.set(PANE_CLOSED, true)
     return next(e)
   })
 

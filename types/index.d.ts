@@ -64,8 +64,8 @@ declare module 'claude-code' {
       revs: SaveRevs
       notice: string | null
       baseline: TurnBaseline | null
-      // Where the pane was last drawn; inline (above the prompt) hides the band's duplicate cards.
-      placement: 'dock' | 'inline' | null
+      // True after the pane is really closed (not minimized); the band then shows its cards.
+      paneClosed: boolean
     }
   }
 }
