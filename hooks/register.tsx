@@ -827,46 +827,63 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
   const findings = await getFindings($)
   const notice = await getNotice($)
   const isAfterCommit = commit.phase === 'pushed' || commit.phase === 'committed'
-  const line = (key: string, children: RenderElement[]) => (
-    <Box key={key} flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
-      {children}
+  // A title line over a button bar; each button grows to share the width and wraps when narrow.
+  const card = (key: string, title: RenderElement, meta: string | null, buttons: RenderElement[]) => (
+    <Box key={key} flexDirection="column">
+      <Box flexDirection="row" gap={1} alignItems="center">
+        {title}
+        {meta ? <Text key="meta" dimColor wrap="truncate-end">{meta}</Text> : null}
+      </Box>
+      <Box flexDirection="row" flexWrap="wrap" gap={1}>
+        {buttons.map((button, i) => (
+          <Box key={`${key}-slot-${i}`} flexGrow={1} flexDirection="column">
+            {button}
+          </Box>
+        ))}
+      </Box>
     </Box>
   )
 
-  let activeRow: RenderElement | null = null
+  let activeCard: RenderElement | null = null
   if (commit.phase === 'ready') {
-    activeRow = line('band-commit', [
-      <Text key="t" bold>{`Commit ${plural(commit.files.length, 'file')}:`}</Text>,
-      <Text key="m" dimColor wrap="truncate-end">{commit.message.split('\n')[0] || '…'}</Text>,
-      action('band-commit-go', 'Commit', () => runGit($, 'commit'), true),
-      action('band-push', 'Commit & Push', () => runGit($, 'push')),
-      action('band-commit-x', 'Dismiss', () => setCommit($, IDLE_COMMIT)),
-    ])
+    activeCard = card(
+      'band-commit',
+      <Text key="t" bold>{`Commit ${plural(commit.files.length, 'file')}`}</Text>,
+      commit.message.split('\n')[0] || '…',
+      [
+        action('band-commit-go', 'Commit', () => runGit($, 'commit'), true),
+        action('band-push', 'Commit & Push', () => runGit($, 'push')),
+        action('band-commit-x', 'Dismiss', () => setCommit($, IDLE_COMMIT)),
+      ],
+    )
   } else if (isAfterCommit) {
-    activeRow = line('band-review', [
-      <Text key="t" dimColor>{commit.note ?? (commit.phase === 'pushed' ? 'Pushed' : 'Committed')}</Text>,
-      action('band-review-go', 'AI Review', () => startReview($), true),
-      action('band-review-x', 'Done', () => setCommit($, IDLE_COMMIT)),
-    ])
+    activeCard = card(
+      'band-review',
+      <Text key="t" bold>{commit.phase === 'pushed' ? 'Pushed' : 'Committed'}</Text>,
+      commit.note ?? null,
+      [
+        action('band-review-go', 'AI Review', () => startReview($), true),
+        action('band-review-x', 'Done', () => setCommit($, IDLE_COMMIT)),
+      ],
+    )
   } else if (findings && !findings.isShared) {
-    activeRow = line('band-findings', [
-      <Text key="t">{`Findings for ${findings.ticket} ready`}</Text>,
+    activeCard = card('band-findings', <Text key="t" bold>{`Findings for ${findings.ticket}`}</Text>, 'ready', [
       action('band-share', 'Share in Jira', () => shareFindings($), true),
       action('band-findings-x', 'Dismiss', () => setFindings($, null)),
     ])
   }
 
+  // GUI surfaces get a row of air between cards; terminal rows above the prompt are scarce.
   return (
-    <Box flexDirection="column" width="100%">
-      {notice
-        ? line('band-notice', [
-            <Text key="t" color="suggestion">{notice}</Text>,
-            <Button key="band-notice-x" label="×" plain dimColor onPress={() => void notify($, null)} />,
-          ])
-        : null}
-      {activeRow}
-      {line('band-ticket', [
-        <Text key="t" color={JIRA_COLOR} bold>{ticket ?? 'No ticket'}</Text>,
+    <Box flexDirection="column" width="100%" rowGap={e.surface === 'terminal' ? 0 : 1}>
+      {notice ? (
+        <Box key="band-notice" flexDirection="row" gap={1} alignItems="center">
+          <Text color="suggestion">{notice}</Text>
+          <Button key="band-notice-x" label="×" plain dimColor onPress={() => void notify($, null)} />
+        </Box>
+      ) : null}
+      {activeCard}
+      {card('band-ticket', <Text key="t" color={JIRA_COLOR} bold>{ticket ?? 'No ticket'}</Text>, null, [
         action('band-update', 'Update ticket', () => updateTicket($)),
         action('band-ac', 'Write AC', () => writeAc($)),
       ])}
