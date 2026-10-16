@@ -563,7 +563,7 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
       borderColor={GROUP_BORDER}
       hover={{ borderColor: GROUP_BORDER_HOVER }}
       paddingX={1}
-      paddingY={0}
+      paddingY={1}
     >
       {title ? <Text bold dimColor>{title}</Text> : null}
       {children}
@@ -611,7 +611,7 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
     })
 
   const updateSection = isOpen('update') ? (
-    <Box key="update-body" flexDirection="column" gap={1} borderStyle="single" borderColor={GROUP_BORDER} paddingX={1}>
+    <Box key="update-body" flexDirection="column" gap={1} borderStyle="single" borderColor={GROUP_BORDER} paddingX={1} paddingY={1}>
       <Text bold>{`Apply to ${ticket ?? 'ticket'}`}</Text>
       <Box flexDirection="column">
         {(Object.keys(PART_LABELS) as UpdatePart[]).map(part => (
@@ -640,7 +640,7 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
   ) : null
 
   const settingsSection = isOpen('settings') ? (
-    <Box key="settings-body" flexDirection="column" gap={1} borderStyle="single" borderColor={GROUP_BORDER} paddingX={1}>
+    <Box key="settings-body" flexDirection="column" gap={1} borderStyle="single" borderColor={GROUP_BORDER} paddingX={1} paddingY={1}>
       <Text bold>Jira setup</Text>
       {field('email', 'Jira / Atlassian email', config.email, 'you@company.com')}
       <Markdown text={`Authorise the **Atlassian** connector in [claude.ai connector settings](${CONNECTORS_URL}), then verify.`} />
@@ -654,7 +654,7 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
   const message = fmt.splitMessage(commit.message)
   const isAfterCommit = commit.phase === 'pushed' || commit.phase === 'committed'
   const reviewSection = isAfterCommit ? (
-    <Box key="review" flexDirection="column" gap={1} borderStyle="single" borderColor={GROUP_BORDER} paddingX={1}>
+    <Box key="review" flexDirection="column" gap={1} borderStyle="single" borderColor={GROUP_BORDER} paddingX={1} paddingY={1}>
       <Text bold>AI Review</Text>
       {row('review-picks', [
         <Select
@@ -741,12 +741,18 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
         settingsSection,
       ].filter(Boolean) as RenderElement[])}
       {group('g-plan', 'PLAN', [
-        <Button
-          key="plan-jira"
-          label={`${check(plan.postToJira)} Auto-post plan as a Jira comment on exiting plan mode`}
-          plain
-          onPress={() => void patchPlan($, { postToJira: !plan.postToJira })}
-        />,
+        // Button labels never wrap, so the long caption is a Text that can shrink in a narrow pane.
+        <Box key="plan-jira-row" flexDirection="row" gap={1} alignItems="flex-start">
+          <Button
+            key="plan-jira"
+            label={check(plan.postToJira)}
+            plain
+            onPress={() => void patchPlan($, { postToJira: !plan.postToJira })}
+          />
+          <Box flexShrink={1} minWidth={0}>
+            <Text>Auto-post plan as a Jira comment on exiting plan mode</Text>
+          </Box>
+        </Box>,
         plan.renamedPath ? <Text key="plan-path" dimColor wrap="truncate-start">{`Saved as ${plan.renamedPath}`}</Text> : null,
         plan.path ? row('plan-actions', [action('plan-post', 'Post plan to Jira', () => postPlan($))]) : null,
       ].filter(Boolean) as RenderElement[])}
