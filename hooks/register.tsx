@@ -603,6 +603,29 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
       ])
     : null
 
+  // The engine owns the frame's title row and × (no API for extra marks), so the toggle heads the body.
+  const isMinimized = isOpen('minimized')
+  const paneHead = (
+    <Box key="pane-head" flexDirection="row" justifyContent={isMinimized ? 'space-between' : 'flex-end'} alignItems="center">
+      {isMinimized ? <Text key="pane-ticket" color={JIRA_COLOR} bold>{ticket ?? 'No ticket'}</Text> : null}
+      <Button
+        key="pane-toggle"
+        label={isMinimized ? '▸ Expand' : '▾ Minimize'}
+        plain
+        dimColor
+        onPress={() => void toggleSection($, 'minimized')}
+      />
+    </Box>
+  )
+  if (isMinimized) {
+    return (
+      <Box flexDirection="column" paddingX={1}>
+        {paneHead}
+        {noticeRow}
+      </Box>
+    )
+  }
+
   const togglePart = (part: UpdatePart) =>
     saveConfig($, {
       updateParts: config.updateParts.includes(part)
@@ -717,6 +740,7 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
 
   return (
     <Box flexDirection="column" gap={1} paddingX={1}>
+      {paneHead}
       {group('g-ticket', null, [
         row('ticket-head', [
           <Text key="ticket-key" color={JIRA_COLOR} bold>{ticket ?? 'No ticket'}</Text>,
