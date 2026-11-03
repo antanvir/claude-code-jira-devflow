@@ -15,9 +15,11 @@ export const PLAN_FILE_RE = /[\\/]\.claude[\\/]plans[\\/][^\\/]+\.md$/i
 export const EDIT_TOOL_RE = /^(Edit|Write|NotebookEdit)$/
 
 export const USAGE_REFRESH_MS = 30_000
-// Bars: green below WARN, amber from WARN, red from DANGER.
+// Bars: green below WARN, orange from WARN, red from DANGER.
 export const WARN_PERCENT = 60
-export const DANGER_PERCENT = 85
+export const DANGER_PERCENT = 90
+// The 'warning' theme key renders gray in VS Code, so it gets an explicit orange.
+export const LEVEL_COLORS = { success: 'success', warning: '#ff9f43', error: 'error' } as const
 // A composer turn with no edits and an answer at least this long counts as findings.
 export const MIN_FINDINGS_CHARS = 200
 export const MAX_DIFF_CHARS = 12_000
@@ -54,10 +56,10 @@ export const JIRA_COLOR = '#4c9aff'
 export const GROUP_BORDER = 'subtle'
 export const GROUP_BORDER_HOVER = 'suggestion'
 export const BAR_CELLS = 6
-// Below this many columns the band uses short bars and an icon-only Compact button.
+// Below this many columns the band uses short bars.
 export const BAND_NARROW_COLUMNS = 72
 export const BAR_CELLS_NARROW = 4
-export const COMPACT_ICON = '⇲'
+// export const COMPACT_ICON = '⇲' // Compact button disabled for now.
 // Pane head and band cards toggle: up caret collapses, down caret expands.
 export const PANE_MINIMIZE_ICON = '▴'
 export const PANE_EXPAND_ICON = '▾'

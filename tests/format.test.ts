@@ -13,7 +13,7 @@ test('email is user-wide, the rest is per repo', async () => {
 test('usage bars switch colour at 60% and 85%', async () => {
   expect(fmt.levelColor(42)).toBe('success')
   expect(fmt.levelColor(60)).toBe('warning')
-  expect(fmt.levelColor(85)).toBe('error')
+  expect(fmt.levelColor(90)).toBe('error')
   expect(fmt.bar(50)).toBe('█████░░░░░')
 })
 

@@ -27,12 +27,12 @@ import {
   BAND_NARROW_COLUMNS,
   BAR_CELLS,
   BAR_CELLS_NARROW,
-  COMPACT_ICON,
   EDIT_TOOL_RE,
   GIT_TIMEOUT_MS,
   GROUP_BORDER,
   GROUP_BORDER_HOVER,
   JIRA_COLOR,
+  LEVEL_COLORS,
   MAX_TRANSITION_STEPS,
   MIN_FINDINGS_CHARS,
   PANE_EXPAND_ICON,
@@ -205,6 +205,8 @@ async function refreshUsage($: EngineInterface): Promise<void> {
   await setUsage($, fmt.toUsageSnapshot(usage))
 }
 
+// Compact button disabled for now; kept for re-enabling.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function compact($: EngineInterface): Promise<void> {
   await notify($, 'Compacting context…')
   await $.session.compact()
@@ -809,7 +811,7 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
 }
 
 // --- band above the prompt --------------------------------------------------
-// Usage meters always (every surface, every session); ticket/commit rows unless
+// Usage meters always (every surface, every session); ticket row + settings link unless
 // the pane is up and expanded inline above the prompt.
 
 async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Promise<RenderElement> {
@@ -831,7 +833,7 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
     <Box key={`meter-${name}`} flexDirection="row" gap={1}>
       <Text dimColor>{name}</Text>
       {m ? (
-        <Text color={fmt.levelColor(m.percent)}>{`${fmt.bar(m.percent, barCells)} ${m.label}`}</Text>
+        <Text color={LEVEL_COLORS[fmt.levelColor(m.percent)]}>{`${fmt.bar(m.percent, barCells)} ${m.label}`}</Text>
       ) : (
         <Text dimColor>n/a</Text>
       )}
@@ -843,7 +845,7 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
       {meter('Weekly', usage.weekly)}
       {meter('Context', usage.context)}
       <Box flexDirection="row" gap={1}>
-        {action('band-compact', isNarrow ? COMPACT_ICON : 'Compact', () => compact($))}
+        {/* {action('band-compact', isNarrow ? COMPACT_ICON : 'Compact', () => compact($))} */}
         <Button key="band-refresh" label="↻" plain dimColor onPress={() => void refreshUsage($)} />
         {hasCards ? (
           <Button
@@ -860,57 +862,8 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
   if (!hasCards || isCollapsed) return <Box flexDirection="column" width="100%">{meters}</Box>
 
   const ticket = await getTicket($)
-  const commit = await getCommit($)
-  const findings = await getFindings($)
   const notice = await getNotice($)
-  const isAfterCommit = commit.phase === 'pushed' || commit.phase === 'committed'
-  // A title line over a button bar; each button grows to share the width and wraps when narrow.
-  const card = (key: string, title: RenderElement, meta: string | null, buttons: RenderElement[]) => (
-    <Box key={key} flexDirection="column">
-      <Box flexDirection="row" gap={1} alignItems="center">
-        {title}
-        {meta ? <Text key="meta" dimColor wrap="truncate-end">{meta}</Text> : null}
-      </Box>
-      <Box flexDirection="row" flexWrap="wrap" gap={1}>
-        {buttons.map((button, i) => (
-          <Box key={`${key}-slot-${i}`} flexGrow={1} flexDirection="column">
-            {button}
-          </Box>
-        ))}
-      </Box>
-    </Box>
-  )
-
-  let activeCard: RenderElement | null = null
-  if (commit.phase === 'ready') {
-    activeCard = card(
-      'band-commit',
-      <Text key="t" bold>{`Commit ${plural(commit.files.length, 'file')}`}</Text>,
-      commit.message.split('\n')[0] || '…',
-      [
-        action('band-commit-go', 'Commit', () => runGit($, 'commit'), true),
-        action('band-push', 'Commit & Push', () => runGit($, 'push')),
-        action('band-commit-x', 'Dismiss', () => setCommit($, IDLE_COMMIT)),
-      ],
-    )
-  } else if (isAfterCommit) {
-    activeCard = card(
-      'band-review',
-      <Text key="t" bold>{commit.phase === 'pushed' ? 'Pushed' : 'Committed'}</Text>,
-      commit.note ?? null,
-      [
-        action('band-review-go', 'AI Review', () => startReview($), true),
-        action('band-review-x', 'Done', () => setCommit($, IDLE_COMMIT)),
-      ],
-    )
-  } else if (findings && !findings.isShared) {
-    activeCard = card('band-findings', <Text key="t" bold>{`Findings for ${findings.ticket}`}</Text>, 'ready', [
-      action('band-share', 'Share in Jira', () => shareFindings($), true),
-      action('band-findings-x', 'Dismiss', () => setFindings($, null)),
-    ])
-  }
-
-  // GUI surfaces get a row of air between cards; terminal rows above the prompt are scarce.
+  // Ticket actions, commit/PR and findings all live in the pane; the band only links to it.
   return (
     <Box flexDirection="column" width="100%" rowGap={e.surface === 'terminal' ? 0 : 1}>
       {notice ? (
@@ -919,12 +872,10 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
           <Button key="band-notice-x" label="×" plain dimColor onPress={() => void notify($, null)} />
         </Box>
       ) : null}
-      {activeCard}
-      {card('band-ticket', <Text key="t" color={JIRA_COLOR} bold>{ticket ?? 'No ticket'}</Text>, null, [
-        action('band-update', 'Update ticket', () => updateTicket($)),
-        action('band-ac', 'Write AC', () => writeAc($)),
-        ...(canReopen ? [action('band-open', 'Open panel', () => showPane($))] : []),
-      ])}
+      <Box key="band-ticket" flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
+        <Text key="t" color={JIRA_COLOR} bold>{ticket ?? 'No ticket'}</Text>
+        {action('band-open', 'Open More Settings', () => showPane($))}
+      </Box>
       {meters}
     </Box>
   )
