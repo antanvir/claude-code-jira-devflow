@@ -64,14 +64,19 @@ test('plan copies are named <TICKET>-<name>.md beside the original', async () =>
   expect(fmt.headingSlug('# Plan: Fix refund double count\n...')).toBe('fix-refund-double-count')
 })
 
-test('update prompt includes only the enabled parts', async () => {
-  const prompt = fmt.updateTicketPrompt('PROJ-1', { ...DEFAULT_CONFIG, email: 'a@b.c', labels: ['team-a', 'qa'], updateParts: ['labels'] })
-  expect(prompt.includes('append labels "team-a", "qa"')).toBe(true)
-  expect(prompt.includes('status')).toBe(false)
+test('ticket update reads labels, field ids and account ids from connector replies', async () => {
+  const issue = JSON.stringify({
+    fields: { labels: ['a'] },
+    editmeta: { fields: { customfield_1: { name: 'Developed By' }, labels: { name: 'Labels' } } },
+  })
+  expect(fmt.parseIssueLabels(issue)).toEqual(['a'])
+  expect(fmt.parseEditFieldId(issue, 'Developed by')).toBe('customfield_1')
+  expect(fmt.missingLabels(['a'], ['a', 'b', 'b'])).toEqual(['b'])
+  const users = JSON.stringify([{ accountId: 'x', emailAddress: 'z@q' }, { accountId: 'y', emailAddress: 'A@b.c' }])
+  expect(fmt.parseAccountId(users, 'a@b.c')).toBe('y')
 })
 
 test('prompts use the bundled, plugin-namespaced skills', async () => {
-  expect(fmt.updateTicketPrompt('PROJ-1', DEFAULT_CONFIG).includes('jira-devflow:update-jira-ticket skill')).toBe(true)
   expect(fmt.writeAcPrompt('PROJ-1').includes('jira-devflow:write-acceptance-criteria skill')).toBe(true)
 })
 

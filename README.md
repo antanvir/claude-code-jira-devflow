@@ -10,7 +10,7 @@ Everything lives in one **Jira Devflow** panel. It opens when a session starts, 
 
 - **Jira setup:** the first Jira action asks for your Jira email and saves it for later sessions. *Verify connection* checks that the Atlassian connector is connected and signed in with that email.
 - **Ticket:** the mod picks up a ticket key (e.g. `PROJ-1234`) from your prompt, or you can set it in the panel.
-- **Update ticket:** sets the status, sets Developed by and appends the labels you enter in the panel (none by default) through the bundled `update-jira-ticket` skill. You choose which of these to apply, and the choice is saved. Nothing else on the ticket is changed.
+- **Update ticket:** sets the status, sets Developed by and appends the labels you enter in the panel (none by default), directly through the Atlassian connector. You choose which of these to apply, and the choice is saved; each checked part runs in turn and its result is listed under the panel. Nothing else on the ticket is changed.
 - **Write AC:** runs the bundled `write-acceptance-criteria` skill for the ticket and saves the criteria to its Acceptance Criteria field (or a comment if the field doesn't exist).
 - **Share findings:** after a turn that analysed the ticket without editing files, posts Claude's answer as a Jira comment.
 - **Plan files:** after a plan is approved, saves a copy named `<TICKET>-<concise-name>.md` next to the original. Turn on *Add plan as a Jira comment* to post the plan too, whichever approval option you pick.

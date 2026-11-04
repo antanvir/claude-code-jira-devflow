@@ -48,6 +48,7 @@ export const STATUS_OPTIONS = ['In Progress', 'Code Review', 'Ready for QA', 'Do
 export const STATUS_SAMPLE_SIZE = 100
 // Hops allowed when no direct transition reaches the requested status.
 export const MAX_TRANSITION_STEPS = 6
+export const DEVELOPED_BY_FIELD = 'Developed by'
 export const REVIEW_MODELS = ['opus', 'sonnet', 'fable', 'haiku']
 export const REVIEW_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 

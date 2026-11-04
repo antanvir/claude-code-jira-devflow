@@ -34,6 +34,7 @@ import {
   JIRA_COLOR,
   LEVEL_COLORS,
   MAX_TRANSITION_STEPS,
+  DEVELOPED_BY_FIELD,
   MIN_FINDINGS_CHARS,
   PANE_EXPAND_ICON,
   PANE_ID,
@@ -363,20 +364,57 @@ async function requireTicket($: EngineInterface): Promise<{ ticket: string; conf
   return { ticket, config }
 }
 
-// Status runs here (deterministic, multi-step); other fields go through the skill.
+async function setDevelopedBy($: EngineInterface, ticket: string, email: string): Promise<Outcome> {
+  const id = await cloudId($)
+  if (!id) return { isOk: false, text: 'No Atlassian site found' }
+  const issue = await callAtlassian($, 'getJiraIssue', { cloudId: id, issueIdOrKey: ticket, fields: ['summary'], expand: 'editmeta' })
+  if (!issue.isOk) return issue
+  const field = fmt.parseEditFieldId(issue.text, DEVELOPED_BY_FIELD)
+  if (!field) return { isOk: false, text: `${ticket}: no editable "${DEVELOPED_BY_FIELD}" field` }
+  const user = await callAtlassian($, 'lookupJiraAccountId', { cloudId: id, searchString: email })
+  const accountId = user.isOk ? fmt.parseAccountId(user.text, email) : undefined
+  if (!accountId) return { isOk: false, text: `${ticket}: Jira user ${email} not found` }
+  const edited = await callAtlassian($, 'editJiraIssue', { cloudId: id, issueIdOrKey: ticket, fields: { [field]: { accountId } } })
+  return edited.isOk ? { isOk: true, text: `${ticket}: ${DEVELOPED_BY_FIELD} → ${email}` } : edited
+}
+
+async function appendLabels($: EngineInterface, ticket: string, labels: readonly string[]): Promise<Outcome> {
+  const id = await cloudId($)
+  if (!id) return { isOk: false, text: 'No Atlassian site found' }
+  const issue = await callAtlassian($, 'getJiraIssue', { cloudId: id, issueIdOrKey: ticket, fields: ['labels'] })
+  if (!issue.isOk) return issue
+  const current = fmt.parseIssueLabels(issue.text)
+  const missing = fmt.missingLabels(current, labels)
+  if (missing.length === 0) return { isOk: true, text: `${ticket}: labels already present` }
+  const edited = await callAtlassian($, 'editJiraIssue', { cloudId: id, issueIdOrKey: ticket, fields: { labels: [...current, ...missing] } })
+  return edited.isOk ? { isOk: true, text: `${ticket}: labels +${missing.join(', +')}` } : edited
+}
+
+// Each checked part runs in turn, so one failing doesn't block the rest; the
+// notice keeps a line per finished step plus the one in progress.
 async function updateTicket($: EngineInterface): Promise<void> {
   await commitDrafts($)
   const ready = await requireTicket($)
   if (!ready) return
   await setSection($, 'update', false)
   const { ticket, config } = ready
-  if (config.updateParts.includes('status')) {
-    const moved = await moveToStatus($, ticket, config.status)
-    await notify($, moved.text)
-    void loadStatuses($, ticket)
+  const steps: Array<[string, () => Promise<Outcome>]> = []
+  if (config.updateParts.includes('status')) steps.push(['Status', () => moveToStatus($, ticket, config.status)])
+  if (config.updateParts.includes('developedBy')) {
+    steps.push([DEVELOPED_BY_FIELD, () => setDevelopedBy($, ticket, config.developedBy || config.email)])
   }
-  const rest = { ...config, updateParts: config.updateParts.filter(part => part !== 'status') }
-  if (fmt.hasSkillParts(rest)) void $.prompt.submit({ text: fmt.updateTicketPrompt(ticket, rest) })
+  if (config.updateParts.includes('labels') && config.labels.length > 0) {
+    steps.push(['Labels', () => appendLabels($, ticket, config.labels)])
+  }
+  if (steps.length === 0) return notify($, 'Nothing to apply: tick a part and set its value')
+  const done: string[] = []
+  for (const [name, run] of steps) {
+    await notify($, [...done, `${name}…`].join('\n'))
+    const result = await run()
+    done.push(`${result.isOk ? '✓' : '✗'} ${name}: ${result.text}`)
+  }
+  await notify($, done.join('\n'))
+  if (config.updateParts.includes('status')) void loadStatuses($, ticket)
 }
 
 async function writeAc($: EngineInterface): Promise<void> {

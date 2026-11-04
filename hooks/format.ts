@@ -246,6 +246,37 @@ export function parseChangelogEdges(text: string): Array<[string, string]> {
   return edges
 }
 
+export function parseIssueLabels(text: string): string[] {
+  let found: string[] | undefined
+  walk(parseJson(text), node => {
+    if (!found && isObject(node.fields) && Array.isArray(node.fields.labels)) found = node.fields.labels.map(String)
+  })
+  return found ?? []
+}
+
+// Field id by display name from an issue's editmeta, so custom field ids aren't hardcoded per site.
+export function parseEditFieldId(text: string, name: string): string | undefined {
+  let found: string | undefined
+  walk(parseJson(text), node => {
+    if (found || !isObject(node.editmeta) || !isObject(node.editmeta.fields)) return
+    found = Object.entries(node.editmeta.fields).find(([, f]) => isObject(f) && same(str(f.name), name))?.[0]
+  })
+  return found
+}
+
+// Prefers the user whose email matches; lookups can return several partial matches.
+export function parseAccountId(text: string, email: string): string | undefined {
+  const users: Json[] = []
+  walk(parseJson(text), node => {
+    if (str(node.accountId)) users.push(node)
+  })
+  return str((users.find(u => same(str(u.emailAddress), email)) ?? users[0])?.accountId) || undefined
+}
+
+export function missingLabels(current: readonly string[], wanted: readonly string[]): string[] {
+  return wanted.filter((label, i) => !current.includes(label) && wanted.indexOf(label) === i)
+}
+
 export function addEdges(edges: Record<string, string[]>, from: string, tos: readonly string[]): Record<string, string[]> {
   const known = edges[from] ?? []
   const added = tos.filter(to => !same(to, from) && !known.some(k => same(k, to)))
@@ -315,29 +346,12 @@ export function statusLabel(statuses: { project: string; isLoading: boolean } | 
   return `Status (${statuses.project}${statuses.isLoading ? ', loading…' : ''})`
 }
 
-// Parts still needing the skill once status is handled by the mod.
-export function hasSkillParts(config: DevflowConfig): boolean {
-  return config.updateParts.includes('developedBy') || (config.updateParts.includes('labels') && config.labels.length > 0)
-}
-
 // --- prompts the mod submits ----------------------------------------------
 
-// Status/field/label changes vary per Jira project, so the model does them through
-// the skills bundled in skills/. Plugin-namespaced so a user's own same-named skill
-// (often hardcoded to its owner) never runs from the panel.
-const UPDATE_SKILL = `${PLUGIN}:update-jira-ticket`
+// AC depends on the session's work, so the model writes it through the bundled skill.
+// Plugin-namespaced so a user's own same-named skill (often hardcoded to its owner)
+// never runs from the panel.
 const AC_SKILL = `${PLUGIN}:write-acceptance-criteria`
-
-export function updateTicketPrompt(ticket: string, config: DevflowConfig): string {
-  const asks: string[] = []
-  if (config.updateParts.includes('status')) asks.push(`status → "${config.status}"`)
-  if (config.updateParts.includes('developedBy')) asks.push(`"Developed by" → ${config.developedBy || config.email}`)
-  if (config.updateParts.includes('labels') && config.labels.length > 0) {
-    const labels = config.labels.map(label => JSON.stringify(label)).join(', ')
-    asks.push(`append labels ${labels} (keep existing labels)`)
-  }
-  return `Use the ${UPDATE_SKILL} skill on ${ticket}: ${asks.join('; ')}. Jira user email: ${config.email}. Report what changed in one line.`
-}
 
 export function writeAcPrompt(ticket: string): string {
   return `Use the ${AC_SKILL} skill for ${ticket} based on this session's work.`
