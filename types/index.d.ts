@@ -40,8 +40,8 @@ export type ReviewChoice = { model: string; effort: string }
 export type TurnBaseline = { isComposer: boolean; hashes: Record<string, string> }
 
 // Collapsible sections; listed ones are expanded, except 'minimized' (the whole pane)
-// and 'bandCollapsed' (the band's cards above the meters).
-export type PaneSection = 'update' | 'settings' | 'minimized' | 'bandCollapsed'
+// and 'bandExpanded' (the band's cards above the meters; collapsed by default).
+export type PaneSection = 'update' | 'settings' | 'minimized' | 'bandExpanded'
 
 // Typed but unsaved field values; Apply or Save commits them.
 export type DraftField = 'email' | 'developedBy' | 'labels' | 'subject' | 'body'
@@ -65,7 +65,7 @@ declare module 'claude-code' {
       revs: SaveRevs
       notice: string | null
       baseline: TurnBaseline | null
-      // True after the pane is really closed (not minimized); the band then shows its cards.
+      // True after the pane is closed; the band then shows its cards.
       paneClosed: boolean
     }
   }

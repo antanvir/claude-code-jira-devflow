@@ -821,7 +821,7 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
   // Render hooks can't write state, so "docked" is the surface's own docks-a-pane flag.
   const open = await getOpen($)
   const hasCards = canReopen || open.includes('minimized') || e.viewport?.isFullscreen === true
-  const isCollapsed = open.includes('bandCollapsed')
+  const isCollapsed = !open.includes('bandExpanded')
   const { Box, Text, Button } = $.ui.resolve(e)
   const isNarrow = (e.viewport?.columns ?? Infinity) < BAND_NARROW_COLUMNS
   const barCells = isNarrow ? BAR_CELLS_NARROW : BAR_CELLS
@@ -853,7 +853,7 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
             label={isCollapsed ? PANE_EXPAND_ICON : PANE_MINIMIZE_ICON}
             plain
             dimColor
-            onPress={() => void toggleSection($, 'bandCollapsed')}
+            onPress={() => void toggleSection($, 'bandExpanded')}
           />
         ) : null}
       </Box>
@@ -891,17 +891,12 @@ export const register: Register = on => {
     await $.command.register({ name: COMMAND, description: 'Open the Jira Devflow panel' })
     $.clock.every(USAGE_REFRESH_MS, () => void refreshUsage($))
     void refreshUsage($)
-    void openPane($)
+    // The pane stays hidden until "Open More Settings"; only the band shows by default.
     return next(e)
   })
 
-  // The person's × minimizes first; a × on the minimized pane really closes it.
+  // × really closes the pane. A state write redraws the band, which then shows its cards again.
   on('ui.close', { id: PANE_ID }, async ($, e, next) => {
-    if (e.origin.kind === 'person' && !(await getOpen($)).includes('minimized')) {
-      await setSection($, 'minimized', true)
-      return { value: undefined }
-    }
-    // A state write redraws the band, which then shows its cards again.
     await $.state.set(PANE_CLOSED, true)
     return next(e)
   })
