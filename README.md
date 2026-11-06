@@ -1,73 +1,104 @@
 # jira-devflow
 
-A Claude Code mod that adds Jira and git actions to Claude Code, so a ticket can go from analysis to plan, commit and review without leaving the chat.
+A Claude Code mod that helps you stay within your usage limits. It shows your limits above the prompt box, and it can pause Claude before a limit runs out, then pick the work back up once the limit resets. It also has optional Jira and git shortcuts.
 
-> Status: first iteration built, not yet tried in a live session.
+## Features at a glance
 
-Everything lives in one **Jira Devflow** panel. It opens when a session starts, or with `/devflow`. A panel is used because VSCode doesn't draw mod content above the prompt box or under a reply.
+| Feature | Where | What it does |
+| --- | --- | --- |
+| **Usage ribbon** | Above the prompt box, always | Live 5-hour, weekly and context meters, colour-coded by how close you are to the limit, with the time until each resets. |
+| **Limit Guard** | **Limit Guard** button on the ribbon | Pauses Claude at a threshold you set (5-hour, weekly or an on-demand budget), saves a handoff doc, and resumes from it after the limit resets. |
+| **Dev settings panel** | **Open More Settings** on the ribbon, or `/devflow` | Optional Jira and git shortcuts: update a ticket, write acceptance criteria, save plans, commit messages, AI review. |
 
-## Screenshots
+## Usage ribbon
 
-**Jira Devflow panel beside the chat**, with the band above the prompt box:
+![Ribbon with usage meters](docs/screenshots/band-usage-meters.png)
 
-![Jira Devflow panel and band](docs/screenshots/panel-side-by-side.png)
+A row above the prompt box, shown in every session:
 
-**Band with usage meters** (5-hour, weekly, context):
+- **5h**, **Weekly** and **Context** meters, each with a bar, the percentage used and the time until it resets (e.g. `↻2h14m`).
+- Bars are green below 60%, orange from 60% and red from 90%.
+- Refreshes every 30 seconds and after every turn. **↻** refreshes it now.
+- **▴ / ▾** shows or hides the second row, which has the current ticket and the **Open More Settings** and **Limit Guard** buttons.
+- In a narrow window the bars get shorter.
 
-![Band with usage meters](docs/screenshots/band-usage-meters.png)
+## Limit Guard
 
-**Expanded pane** with Jira actions and *Apply to ticket* options:
+Stops a long task before it runs into the limit and continues it after the reset, so nothing is lost and no on-demand usage is spent unless you allow it.
+
+**What happens when a threshold is reached**
+
+1. Claude's current turn is stopped.
+2. Claude writes a handoff doc: the goal, what's done, exactly where it stopped, next steps, key files and decisions, and open questions. It's saved as `handoff-<TICKET>-<date-time>.md` in the handoff directory.
+3. The session is paused: tool calls are refused, new turns are stopped and typed prompts are held back. Slash commands still work. The ribbon button changes to **Limit Guard ⏸**.
+4. One minute after the limit resets, the handoff doc is sent back to Claude and the work carries on from where it stopped.
+
+**Settings** (saved per repo; defaults are filled into the fields)
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| Guard on | On | Turns the guard on or off. |
+| 5-hour limit % | 95 | Pause when the 5-hour window reaches this. |
+| Weekly limit % | 97 | Pause when the weekly window reaches this. |
+| On-demand budget $ | 0 (off) | How much on-demand usage Claude may spend after a limit is fully used. |
+| Pause by | % limits | Shown when the budget is above $0. **% limits**: the thresholds above pause Claude and nothing is spent on-demand. **On-demand budget**: Claude can go past 100% and pauses once it has spent the budget. |
+| Handoff directory | `<repo>/.claude/handoffs` | Where handoff docs are saved. Created when needed. |
+
+**Buttons:** **Save**, **Reset to defaults**, and **Resume now** while paused. Resume now continues straight away and stops checking that limit until it resets.
+
+**Good to know**
+
+- Usage is read after each reply from Claude, so a pause can land a point or two past the threshold.
+- Writing the handoff doc uses one more request.
+- Auto-resume needs Claude Code to be open when the limit resets. If it's closed, nothing resumes on its own; the handoff doc stays in the handoff directory.
+- Handoff docs are never deleted.
+
+## Dev settings panel
 
 ![Pane with Jira actions](docs/screenshots/pane-jira-actions.png)
 
-## Features
+Optional, for Jira-based work. Opens with **Open More Settings** or `/devflow`; it stays hidden until then.
 
-- **Jira setup:** the first Jira action asks for your Jira email and saves it for later sessions. *Verify connection* checks that the Atlassian connector is connected and signed in with that email.
-- **Ticket:** the mod picks up a ticket key (e.g. `PROJ-1234`) from your prompt, or you can set it in the panel.
-- **Update ticket:** sets the status, sets Developed by and appends the labels you enter in the panel (none by default), directly through the Atlassian connector. You choose which of these to apply, and the choice is saved; each checked part runs in turn and its result is listed under the panel. Nothing else on the ticket is changed.
-- **Write AC:** runs the bundled `write-acceptance-criteria` skill for the ticket and saves the criteria to its Acceptance Criteria field (or a comment if the field doesn't exist).
-- **Share findings:** after a turn that analysed the ticket without editing files, posts Claude's answer as a Jira comment.
-- **Plan files:** after a plan is approved, saves a copy named `<TICKET>-<concise-name>.md` next to the original. Turn on *Add plan as a Jira comment* to post the plan too, whichever approval option you pick.
-- **Commit card:** after Claude edits files, lists the touched files and writes a commit message that follows the *Git Commits* section of your CLAUDE.md, with no Co-Authored-By line. Buttons: Stage, Commit, Commit & Push, Regenerate.
-- **AI Review:** after a commit or push, asks Claude to start a review agent on `git diff <base>...HEAD` with the model and effort you choose.
-- **Usage:** 5-hour, weekly, on-demand and context meters, colour-coded (green below 60%, amber 60–85%, red 85%+), with a **Compact** button.
+| Section | What it does |
+| --- | --- |
+| Ticket | Picks up a ticket key (e.g. `PROJ-1234`) from your prompt, or set it by hand. |
+| Update ticket | Sets the status, Developed by and extra labels through the Atlassian connector. Pick which parts to apply. |
+| Write AC | Writes acceptance criteria for the ticket with the bundled skill and adds them to Jira. |
+| Settings | Your Jira email and a connector check. |
+| Plan | Saves an approved plan as `<TICKET>-<name>.md`; can also post it as a Jira comment. |
+| Findings | After a turn that analysed without editing files, posts Claude's answer as a Jira comment. |
+| Commit | After Claude edits files: lists them and writes a commit message that follows your CLAUDE.md. Stage, Commit, Commit & Push, Regenerate. |
+| AI Review | After a commit, starts a review agent on `git diff <base>...HEAD` with the model and effort you pick. |
 
-Both Jira skills ship in [skills/](skills/) and are invoked as `jira-devflow:<skill>`, so no personal skills are needed and any same-named skills of your own are left alone.
+Both Jira skills ship in [skills/](skills/) as `jira-devflow:<skill>`, so same-named personal skills are left alone.
 
 ## Requirements
 
 - Claude Code 2.1.272 or later, with mod (plugin hooks) support
-- The Atlassian connector authorised in claude.ai connector settings
 - Git
+- For the Jira features only: the Atlassian connector authorised in claude.ai connector settings
 
-Where it runs: VSCode, Claude Desktop (Code tab) and the terminal. On mobile the panel shows only the ticket.
+Works in VSCode, Claude Desktop (Code tab) and the terminal. On mobile the panels show a one-line summary.
 
 ## Install
 
-Not published yet. To load it from this folder while developing:
-
-- **Terminal:**
-
-  ```
-  claude --plugin-dir <path-to-this-repo>
-  ```
-
-- **VSCode / Desktop:** add the folder to the `env` block of `~/.claude/settings.json`, then start a new session:
-
-  ```json
-  { "env": { "CLAUDE_CODE_PLUGIN_DIRS": "C:\\path\\to\\claude-code-jira-devflow" } }
-  ```
-
-Once published, install it from a terminal (the `/plugin` slash command is unavailable in VSCode / Desktop):
+From a terminal (the `/plugin` slash command isn't available in VSCode or Desktop):
 
 ```
 claude plugin marketplace add antanvir/claude-code-jira-devflow
 claude plugin install jira-devflow@devflow
 ```
 
-### Updating
+To load it from a local copy instead:
 
-After a new version is pushed, run from a terminal:
+- **Terminal:** `claude --plugin-dir <path-to-this-repo>`
+- **VSCode / Desktop:** add the folder to the `env` block of `~/.claude/settings.json`, then start a new session:
+
+  ```json
+  { "env": { "CLAUDE_CODE_PLUGIN_DIRS": "C:\\path\\to\\claude-code-jira-devflow" } }
+  ```
+
+### Updating
 
 ```
 claude plugin marketplace update devflow
@@ -84,14 +115,14 @@ claude plugin install jira-devflow@devflow
 ## Development
 
 ```
-claude plugin validate .claude-plugin/plugin.json
+claude plugin validate .
 claude plugin test .
 ```
 
-- `hooks/register.tsx`: every hook and every function that uses `$`. `claude plugin validate` only follows `$` within the file it's declared in, so these can't move to other files.
-- `hooks/format.ts`: pure helpers (meters, git parsing, prompts).
+- `hooks/register.tsx`: every hook and every function that uses `$` (ribbon, Limit Guard, dev panel). `claude plugin validate` only follows `$` within the file it's declared in, so these can't move to other files.
+- `hooks/format.ts`: pure helpers (meters, limit checks, git parsing, prompts).
 - `hooks/constants.ts`: names, thresholds, defaults.
-- `types/index.d.ts`: the shape of the panel's session state.
+- `types/index.d.ts`: the shape of the mod's session state.
 
 ## License
 
