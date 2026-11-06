@@ -6,6 +6,20 @@ A Claude Code mod that adds Jira and git actions to Claude Code, so a ticket can
 
 Everything lives in one **Jira Devflow** panel. It opens when a session starts, or with `/devflow`. A panel is used because VSCode doesn't draw mod content above the prompt box or under a reply.
 
+## Screenshots
+
+**Jira Devflow panel beside the chat**, with the band above the prompt box:
+
+![Jira Devflow panel and band](docs/screenshots/panel-side-by-side.png)
+
+**Band with usage meters** (5-hour, weekly, context):
+
+![Band with usage meters](docs/screenshots/band-usage-meters.png)
+
+**Expanded pane** with Jira actions and *Apply to ticket* options:
+
+![Pane with Jira actions](docs/screenshots/pane-jira-actions.png)
+
 ## Features
 
 - **Jira setup:** the first Jira action asks for your Jira email and saves it for later sessions. *Verify connection* checks that the Atlassian connector is connected and signed in with that email.
