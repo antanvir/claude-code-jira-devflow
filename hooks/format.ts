@@ -1,8 +1,17 @@
 // Pure helpers: no `$` here (the engine only follows `$` within register.tsx).
 import type { SessionUsage } from 'claude-code'
 
-import type { DevflowConfig, Meter, UsageSnapshot } from '../types'
-import { DANGER_PERCENT, GLOBAL_CONFIG_FIELDS, MAX_DIFF_CHARS, PLUGIN, WARN_PERCENT } from './constants'
+import type { DevflowConfig, GuardConfig, GuardPause, GuardTrip, Meter, UsageSnapshot } from '../types'
+import {
+  DANGER_PERCENT,
+  GLOBAL_CONFIG_FIELDS,
+  GUARD_GRACE_MS,
+  GUARD_KINDS,
+  HANDOFF_SUBDIR,
+  MAX_DIFF_CHARS,
+  PLUGIN,
+  WARN_PERCENT,
+} from './constants'
 
 const UUID_RE = /"(?:id|cloudId)"\s*:\s*"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/i
 const GIT_RULES_RE = /##\s*Git Commits?[^\n]*\n([\s\S]*?)(?=\n##\s|$)/i
@@ -363,4 +372,74 @@ export function reviewPrompt(model: string, effort: string, base: string): strin
     `(\`git diff ${base}...HEAD\`) for correctness bugs, ranked by severity.`,
     'Relay its findings; do not edit files.',
   ].join(' ')
+}
+
+// --- limit guard -------------------------------------------------------------
+
+type Limit = SessionUsage['rateLimits'][number]
+type Watched = Limit & { resetsAt: string }
+
+// Only 5h and weekly windows that still have a future reset count.
+export function watchedLimits(limits: readonly Limit[], now: number, quiet: string | null): Watched[] {
+  return limits.filter(
+    (l): l is Watched => l.kind in GUARD_KINDS && !!l.resetsAt && Date.parse(l.resetsAt) > now && l.resetsAt !== quiet,
+  )
+}
+
+const kindLabel = (kind: string) => GUARD_KINDS[kind as keyof typeof GUARD_KINDS] ?? kind
+// The later reset wins: pausing for the shorter one would trip again at once.
+const latest = (limits: Watched[]) => limits.sort((a, b) => Date.parse(b.resetsAt) - Date.parse(a.resetsAt))[0]
+
+export function guardTrip(limits: Watched[], config: GuardConfig): GuardTrip | undefined {
+  const hit = latest(limits.filter(l => l.percentUsed >= (l.kind === 'five_hour' ? config.fiveHour : config.weekly)))
+  return hit && { kind: hit.kind, resetsAt: hit.resetsAt, reason: `${kindLabel(hit.kind)} ${hit.percentUsed}%` }
+}
+
+export const spilledLimit = (limits: Watched[]) => latest(limits.filter(l => l.percentUsed >= 100))
+
+export function overBudget(full: Watched, baseUsd: number, costUsd: number, budgetUsd: number): GuardTrip | undefined {
+  const spent = costUsd - baseUsd
+  if (spent < budgetUsd) return undefined
+  return { kind: full.kind, resetsAt: full.resetsAt, reason: `$${spent.toFixed(2)} of on-demand` }
+}
+
+export const guardResumesAt = (pause: GuardPause) => Date.parse(pause.resetsAt) + GUARD_GRACE_MS
+
+// Invalid or out-of-range input keeps the saved value.
+export function parseNumber(text: string, saved: number, max: number): number {
+  const n = Number(text.trim().replace(/[%$]/g, ''))
+  return text.trim() !== '' && Number.isFinite(n) && n >= 0 && n <= max ? n : saved
+}
+
+export const defaultHandoffDir = (root: string) => `${root.replace(/[\/]+$/, '')}/${HANDOFF_SUBDIR}`
+
+// Ticket + timestamp, so a shared folder never overwrites an earlier handoff.
+export function handoffFileName(ticket: string | null, now: number): string {
+  const stamp = new Date(now).toISOString().slice(0, 16).replace(/[:T]/g, '-')
+  return `handoff-${ticket ?? 'session'}-${stamp}.md`
+}
+
+export function guardStatus(pause: GuardPause | null, config: GuardConfig): string {
+  if (!config.isEnabled) return 'Off'
+  if (!pause) return 'Watching'
+  if (pause.isWriting) return `Writing handoff (${pause.reason})…`
+  return `Paused at ${pause.reason} · resumes ${new Date(guardResumesAt(pause)).toLocaleString()}`
+}
+
+export function handoffPrompt(trip: GuardTrip): string {
+  return [
+    `You are being paused to keep usage in bounds (${trip.reason}; the ${kindLabel(trip.kind)} limit).`,
+    'Write a handoff document that lets you pick this work up after the limit resets, with no other memory of this conversation.',
+    'Use Markdown with these sections: Goal; Done so far; In progress (exactly where you stopped, including any half-finished edit);',
+    'Next steps (in order); Key files and facts (paths, commands, decisions, gotchas); Open questions for the user.',
+    'Be specific and concise. Reply with the document only.',
+  ].join(' ')
+}
+
+export const fallbackHandoff = (trip: GuardTrip) =>
+  `# Handoff\n\nPaused by Limit Guard at ${trip.reason}. The handoff could not be written; pick up from the conversation above.\n`
+
+export function resumePrompt(path: string | undefined, doc: string | undefined): string {
+  if (!doc) return 'The usage limit has reset. Limit Guard paused you earlier; pick the work up where you left off.'
+  return `The usage limit has reset. Limit Guard paused you and saved this handoff to ${path}. Pick the work up from it:\n\n${doc}`
 }

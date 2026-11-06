@@ -1,6 +1,6 @@
 // jira-devflow: every function that touches `$` lives in this file,
 // because the engine follows `$` only into functions declared in the same file.
-import type { EngineInterface, Register, RenderElement, RenderInput } from 'claude-code'
+import type { Elements, EngineInterface, Register, RenderElement, RenderInput, SessionUsage } from 'claude-code'
 
 import type {
   CommitCard,
@@ -8,6 +8,11 @@ import type {
   DraftField,
   Drafts,
   Findings,
+  GuardConfig,
+  GuardField,
+  GuardPause,
+  GuardSpend,
+  GuardTrip,
   Meter,
   PaneSection,
   PlanInfo,
@@ -24,6 +29,7 @@ import {
   COMMAND,
   CONNECTORS_URL,
   DEFAULT_CONFIG,
+  DEFAULT_GUARD,
   BAND_NARROW_COLUMNS,
   BAR_CELLS,
   BAR_CELLS_NARROW,
@@ -31,6 +37,8 @@ import {
   GIT_TIMEOUT_MS,
   GROUP_BORDER,
   GROUP_BORDER_HOVER,
+  GUARD_PANE_ID,
+  GUARD_PANE_TITLE,
   JIRA_COLOR,
   LEVEL_COLORS,
   MAX_TRANSITION_STEPS,
@@ -48,6 +56,7 @@ import {
   STATUS_SAMPLE_SIZE,
   STORE_CLOUD_ID,
   STORE_CONFIG,
+  STORE_GUARD_PREFIX,
   STORE_REPO_CONFIG_PREFIX,
   STORE_WORKFLOW_PREFIX,
   TICKET_RE,
@@ -79,6 +88,10 @@ const REVS = { plugin: 'jira-devflow', key: 'revs' } as const
 const NOTICE = { plugin: 'jira-devflow', key: 'notice' } as const
 const BASELINE = { plugin: 'jira-devflow', key: 'baseline' } as const
 const PANE_CLOSED = { plugin: 'jira-devflow', key: 'paneClosed' } as const
+const GUARD = { plugin: 'jira-devflow', key: 'guard' } as const
+const GUARD_PAUSE = { plugin: 'jira-devflow', key: 'guardPause' } as const
+const GUARD_SPEND = { plugin: 'jira-devflow', key: 'guardSpend' } as const
+const GUARD_QUIET = { plugin: 'jira-devflow', key: 'guardQuiet' } as const
 
 const getTicket = async ($: EngineInterface) => (await $.state.get(TICKET)).value ?? null
 const getStatuses = async ($: EngineInterface) => (await $.state.get(STATUSES)).value ?? null
@@ -105,6 +118,14 @@ const getNotice = async ($: EngineInterface) => (await $.state.get(NOTICE)).valu
 const getBaseline = async ($: EngineInterface) => (await $.state.get(BASELINE)).value ?? null
 const setBaseline = ($: EngineInterface, value: TurnBaseline | null) => $.state.set(BASELINE, value)
 const getPaneClosed = async ($: EngineInterface) => (await $.state.get(PANE_CLOSED)).value ?? false
+const getGuard = async ($: EngineInterface) => (await $.state.get(GUARD)).value ?? DEFAULT_GUARD
+const setGuard = ($: EngineInterface, value: GuardConfig) => $.state.set(GUARD, value)
+const getGuardPause = async ($: EngineInterface) => (await $.state.get(GUARD_PAUSE)).value ?? null
+const setGuardPause = ($: EngineInterface, value: GuardPause | null) => $.state.set(GUARD_PAUSE, value)
+const getGuardSpend = async ($: EngineInterface) => (await $.state.get(GUARD_SPEND)).value ?? null
+const setGuardSpend = ($: EngineInterface, value: GuardSpend | null) => $.state.set(GUARD_SPEND, value)
+const getGuardQuiet = async ($: EngineInterface) => (await $.state.get(GUARD_QUIET)).value ?? null
+const setGuardQuiet = ($: EngineInterface, value: string | null) => $.state.set(GUARD_QUIET, value)
 
 async function setTicket($: EngineInterface, value: string | null): Promise<void> {
   const previous = await getTicket($)
@@ -130,9 +151,10 @@ async function setDraft($: EngineInterface, field: DraftField, value: string): P
 }
 
 // Writes typed-but-unsaved values (all, or one field) so nothing typed is lost.
-async function commitDrafts($: EngineInterface, only?: DraftField): Promise<void> {
+async function commitDrafts($: EngineInterface, only?: DraftField | readonly DraftField[]): Promise<void> {
   const drafts = await getDrafts($)
-  const fields = (Object.keys(drafts) as DraftField[]).filter(f => !only || f === only)
+  const picked = only === undefined ? undefined : ([] as DraftField[]).concat(only)
+  const fields = (Object.keys(drafts) as DraftField[]).filter(f => !picked || picked.includes(f))
   const patch: Partial<DevflowConfig> = {}
   if (fields.includes('subject') || fields.includes('body')) {
     const saved = fmt.splitMessage((await getCommit($)).message)
@@ -144,6 +166,18 @@ async function commitDrafts($: EngineInterface, only?: DraftField): Promise<void
     else if (field === 'email' || field === 'developedBy') patch[field] = value.trim()
   }
   if (Object.keys(patch).length > 0) await saveConfig($, patch)
+  const guardFields = fields.filter((f): f is GuardField => GUARD_FIELDS.includes(f as GuardField))
+  if (guardFields.length > 0) {
+    const guard = await getGuard($)
+    const value = (f: GuardField) => drafts[f] ?? ''
+    const pick = guardFields.includes.bind(guardFields)
+    await saveGuard($, {
+      ...(pick('guardFiveHour') ? { fiveHour: fmt.parseNumber(value('guardFiveHour'), guard.fiveHour, 100) } : {}),
+      ...(pick('guardWeekly') ? { weekly: fmt.parseNumber(value('guardWeekly'), guard.weekly, 100) } : {}),
+      ...(pick('guardOnDemand') ? { onDemandUsd: fmt.parseNumber(value('guardOnDemand'), guard.onDemandUsd, Infinity) } : {}),
+      ...(pick('guardDir') && value('guardDir').trim() ? { handoffDir: value('guardDir').trim() } : {}),
+    })
+  }
   const rest = { ...drafts }
   for (const field of fields) delete rest[field]
   await setDrafts($, rest)
@@ -213,6 +247,103 @@ async function compact($: EngineInterface): Promise<void> {
   await $.session.compact()
   await refreshUsage($)
   await notify($, 'Context compacted')
+}
+
+// --- limit guard -------------------------------------------------------------
+// Pauses before the 5h/weekly limit (or an on-demand budget), has the model write a
+// handoff doc, then resumes from it once the window resets.
+
+const GUARD_FIELDS: readonly GuardField[] = ['guardFiveHour', 'guardWeekly', 'guardOnDemand', 'guardDir']
+
+// Module variables: a reload starts them over; the pause itself is in $.state.
+let guardTurnId: string | undefined
+let isPausing = false
+
+async function defaultGuard($: EngineInterface): Promise<GuardConfig> {
+  const root = await git($, ['rev-parse', '--show-toplevel'])
+  return { ...DEFAULT_GUARD, handoffDir: fmt.defaultHandoffDir(root.isOk ? root.text : await $.session.cwd()) }
+}
+
+async function loadGuard($: EngineInterface): Promise<GuardConfig> {
+  const saved = (await $.store.get(STORE_GUARD_PREFIX + (await repoConfigKey($)))) as Partial<GuardConfig> | undefined
+  const defaults = await defaultGuard($)
+  return { ...defaults, ...saved, handoffDir: saved?.handoffDir || defaults.handoffDir }
+}
+
+async function saveGuard($: EngineInterface, patch: Partial<GuardConfig>): Promise<void> {
+  const next = { ...(await getGuard($)), ...patch }
+  await setGuard($, next)
+  await $.store.set(STORE_GUARD_PREFIX + (await repoConfigKey($)), next)
+  // The last reading may already be past a lowered threshold; no new one may come.
+  await checkGuard($, (await $.session.usage()).rateLimits)
+}
+
+async function openGuardPane($: EngineInterface): Promise<boolean> {
+  return (await $.ui.open({ id: GUARD_PANE_ID, title: GUARD_PANE_TITLE })).isPlaced
+}
+
+async function checkGuard($: EngineInterface, limits: SessionUsage['rateLimits'], costUsd?: number): Promise<void> {
+  const config = await getGuard($)
+  if (!config.isEnabled || isPausing || (await getGuardPause($))) return
+  const watched = fmt.watchedLimits(limits, await $.clock.now(), await getGuardQuiet($))
+  const hit = config.onDemandUsd > 0 ? await spendTrip($, watched, costUsd, config.onDemandUsd) : fmt.guardTrip(watched, config)
+  // Off this dispatch: the pause aborts the turn and waits on the model.
+  if (hit) $.clock.after(0, () => void pauseForLimit($, hit))
+}
+
+async function spendTrip(
+  $: EngineInterface,
+  watched: ReturnType<typeof fmt.watchedLimits>,
+  costUsd: number | undefined,
+  budgetUsd: number,
+): Promise<GuardTrip | undefined> {
+  const full = fmt.spilledLimit(watched)
+  if (!full || costUsd === undefined) return undefined
+  let spend = await getGuardSpend($)
+  if (spend?.resetsAt !== full.resetsAt) {
+    spend = { resetsAt: full.resetsAt, baseUsd: costUsd }
+    await setGuardSpend($, spend)
+  }
+  return fmt.overBudget(full, spend.baseUsd, costUsd, budgetUsd)
+}
+
+async function pauseForLimit($: EngineInterface, trip: GuardTrip): Promise<void> {
+  if (isPausing || (await getGuardPause($))) return
+  isPausing = true
+  try {
+    const now = await $.clock.now()
+    await setGuardPause($, { ...trip, pausedAt: now, isWriting: true })
+    if (guardTurnId) await $.turn.abort({ turnId: guardTurnId }).catch(() => undefined)
+    await notify($, `Limit Guard: ${trip.reason}, writing handoff…`)
+    const reply = await $.model.fork({ prompt: fmt.handoffPrompt(trip) })
+    const doc = reply.isAnswered ? reply.text : fmt.fallbackHandoff(trip)
+    const path = `${(await getGuard($)).handoffDir}/${fmt.handoffFileName(await getTicket($), now)}`
+    // A failed write still keeps the pause, so it still ends at the reset.
+    const isSaved = await $.fs.write(path, doc).then(() => true, () => false)
+    const paused = await getGuardPause($)
+    if (!paused) return // "Resume now" while the handoff was being written wins.
+    const next = { ...paused, isWriting: false, handoffPath: isSaved ? path : undefined }
+    await setGuardPause($, next)
+    await notify($, `${fmt.guardStatus(next, await getGuard($))}${isSaved ? `\nHandoff: ${path}` : ''}`)
+  } finally {
+    isPausing = false
+  }
+}
+
+async function resumeGuard($: EngineInterface, isEarly: boolean): Promise<void> {
+  const pause = await getGuardPause($)
+  if (!pause) return
+  await setGuardPause($, null)
+  // An early resume would trip again on the same reading; quiet that window until it resets.
+  if (isEarly) await setGuardQuiet($, pause.resetsAt)
+  const doc = pause.handoffPath ? await $.fs.read(pause.handoffPath).then(String, () => undefined) : undefined
+  await notify($, 'Limit Guard: resuming from the handoff')
+  $.clock.after(0, () => void $.prompt.submit({ text: fmt.resumePrompt(pause.handoffPath, doc) }))
+}
+
+async function guardTick($: EngineInterface): Promise<void> {
+  const pause = await getGuardPause($)
+  if (pause && !pause.isWriting && (await $.clock.now()) >= fmt.guardResumesAt(pause)) await resumeGuard($, false)
 }
 
 // --- Jira ------------------------------------------------------------------
@@ -587,28 +718,10 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 const JIRA_HINT = 'Save, or it is applied with Apply to Jira'
 const COMMIT_HINT = 'Save, or it is used by Stage/Commit'
 
-async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<RenderElement> {
-  const ticket = await getTicket($)
-  const config = await getConfig($)
-  const commit = await getCommit($)
-  const findings = await getFindings($)
-  const plan = await getPlan($)
-  const review = await getReview($)
-  const open = await getOpen($)
-  const drafts = await getDrafts($)
-  const revs = await getRevs($)
-  const notice = await getNotice($)
-  const statuses = await getStatuses($)
-  const projectStatuses = ticket && statuses?.project === fmt.projectKey(ticket) ? statuses : null
+type PaneUi = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Input'>
 
-  if (e.surface === 'mobile') {
-    const { Text } = $.ui.resolve(e)
-    return <Text>{ticket ?? 'No ticket'} · open on desktop or VSCode for actions</Text>
-  }
-
-  const { Box, Text, Button, Input, Select, Markdown } = $.ui.resolve(e)
-  const isOpen = (section: PaneSection) => open.includes(section)
-
+// Shared by the Devflow and Limit Guard panes, so both keep the same frames and spacing.
+function paneKit($: EngineInterface, { Box, Text, Button, Input }: PaneUi, drafts: Drafts, revs: SaveRevs) {
   // Bare Buttons only: native chrome gives equal heights, hover and the pointer cursor.
   const action = (key: string, label: string, onPress: () => Promise<unknown>, isPrimary = false) => (
     <Button key={key} label={label} variant={isPrimary ? 'primary' : 'secondary'} onPress={() => void onPress()} />
@@ -656,6 +769,34 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
       </Box>
     )
   }
+
+  return { action, group, row, field }
+}
+
+async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<RenderElement> {
+  const ticket = await getTicket($)
+  const config = await getConfig($)
+  const commit = await getCommit($)
+  const findings = await getFindings($)
+  const plan = await getPlan($)
+  const review = await getReview($)
+  const open = await getOpen($)
+  const drafts = await getDrafts($)
+  const revs = await getRevs($)
+  const notice = await getNotice($)
+  const statuses = await getStatuses($)
+  const projectStatuses = ticket && statuses?.project === fmt.projectKey(ticket) ? statuses : null
+
+  if (e.surface === 'mobile') {
+    const { Text } = $.ui.resolve(e)
+    return <Text>{ticket ?? 'No ticket'} · open on desktop or VSCode for actions</Text>
+  }
+
+  const ui = $.ui.resolve(e)
+  const { Box, Text, Button, Input, Select, Markdown } = ui
+  const isOpen = (section: PaneSection) => open.includes(section)
+
+  const { action, group, row, field } = paneKit($, ui, drafts, revs)
 
   const noticeRow = notice
     ? row('notice', [
@@ -848,6 +989,63 @@ async function renderPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<R
   )
 }
 
+const GUARD_HINT = 'Save, or it is applied with Save'
+
+async function renderGuardPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<RenderElement> {
+  const config = await getGuard($)
+  const pause = await getGuardPause($)
+  const usage = await getUsage($)
+  const notice = await getNotice($)
+  const status = fmt.guardStatus(pause, config)
+  if (e.surface === 'mobile') {
+    const { Text } = $.ui.resolve(e)
+    return <Text>{`Limit Guard · ${status}`}</Text>
+  }
+  const ui = $.ui.resolve(e)
+  const { Box, Text, Button } = ui
+  const { action, group, row, field } = paneKit($, ui, await getDrafts($), await getRevs($))
+  const now = (m?: Meter) => (m ? ` (now ${m.percent}%)` : '')
+
+  return (
+    <Box flexDirection="column" gap={1} paddingX={1}>
+      {group('g-guard-status', 'STATUS', [
+        row('guard-status', [
+          <Button
+            key="guard-enabled"
+            label={`${check(config.isEnabled)} Guard on`}
+            plain
+            onPress={() => void saveGuard($, { isEnabled: !config.isEnabled })}
+          />,
+          <Text key="guard-state" color={pause ? 'warning' : 'success'}>{status}</Text>,
+        ]),
+        pause?.handoffPath ? <Text key="guard-path" dimColor wrap="truncate-start">{`Handoff: ${pause.handoffPath}`}</Text> : null,
+        pause && !pause.isWriting ? row('guard-resume', [action('guard-resume-now', 'Resume now', () => resumeGuard($, true), true)]) : null,
+      ].filter(Boolean) as RenderElement[])}
+      {group('g-guard-limits', 'THRESHOLDS', [
+        field('guardFiveHour', `5-hour limit %${now(usage.fiveHour)}`, String(config.fiveHour), '95', GUARD_HINT),
+        field('guardWeekly', `Weekly limit %${now(usage.weekly)}`, String(config.weekly), '97', GUARD_HINT),
+        field('guardOnDemand', 'On-demand budget $ (0 = off; above 0 replaces the % limits)', String(config.onDemandUsd), '0', GUARD_HINT),
+        field('guardDir', 'Handoff directory', config.handoffDir, fmt.defaultHandoffDir('<repo>'), GUARD_HINT),
+        row('guard-actions', [
+          action('guard-save', 'Save', () => commitDrafts($, GUARD_FIELDS), true),
+          action('guard-defaults', 'Reset to defaults', async () => {
+            await setDrafts($, Object.fromEntries(Object.entries(await getDrafts($)).filter(([k]) => !GUARD_FIELDS.includes(k as GuardField))))
+            await saveGuard($, { ...(await defaultGuard($)), isEnabled: config.isEnabled })
+            const revs = await getRevs($)
+            await setRevs($, { ...revs, ...Object.fromEntries(GUARD_FIELDS.map(f => [f, (revs[f] ?? 0) + 1])) })
+          }),
+        ]),
+      ])}
+      {notice ? (
+        <Box key="guard-notice" flexDirection="row" gap={1} alignItems="center">
+          <Text color="suggestion">{notice}</Text>
+          <Button key="guard-notice-x" label="×" plain dimColor onPress={() => void notify($, null)} />
+        </Box>
+      ) : null}
+    </Box>
+  )
+}
+
 // --- band above the prompt --------------------------------------------------
 // Usage meters always (every surface, every session); ticket row + settings link unless
 // the pane is up and expanded inline above the prompt.
@@ -913,6 +1111,7 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
       <Box key="band-ticket" flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
         <Text key="t" color={JIRA_COLOR} bold>{ticket ?? 'No ticket'}</Text>
         {action('band-open', 'Open More Settings', () => showPane($))}
+        {action('band-guard', (await getGuardPause($)) ? 'Limit Guard ⏸' : 'Limit Guard', () => openGuardPane($))}
       </Box>
       {meters}
     </Box>
@@ -924,10 +1123,14 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await setConfig($, await loadConfig($))
+    await setGuard($, await loadGuard($))
     const ticket = await getTicket($)
     if (ticket) void loadStatuses($, ticket)
     await $.command.register({ name: COMMAND, description: 'Open the Jira Devflow panel' })
-    $.clock.every(USAGE_REFRESH_MS, () => void refreshUsage($))
+    $.clock.every(USAGE_REFRESH_MS, () => {
+      void refreshUsage($)
+      void guardTick($)
+    })
     void refreshUsage($)
     // The pane stays hidden until "Open More Settings"; only the band shows by default.
     return next(e)
@@ -944,7 +1147,32 @@ export const register: Register = on => {
     return { text: isPlaced ? 'Jira Devflow panel opened.' : 'Jira Devflow shown above the prompt (this surface has no panes).' }
   })
 
+  // Limit Guard: one reading per API response, so a pause can land a point past the threshold.
+  on('session.measure', async ($, e, next) => {
+    if (e.changed.includes('rateLimits') || e.changed.includes('cost')) await checkGuard($, e.rateLimits, e.cost?.usd)
+    return next(e)
+  })
+
+  on('turn.start', async ($, e, next) => {
+    // Subagent turns carry agentId at runtime, though this build's input type omits it.
+    if ((e as { agentId?: string }).agentId) return next(e)
+    guardTurnId = e.turnId
+    const result = await next(e)
+    // A turn that starts while paused (a continuation, a skill) ends at once.
+    if (await getGuardPause($)) void $.turn.abort({ turnId: e.turnId }).catch(() => undefined)
+    return result
+  })
+
+  on('tool.call', async ($, e, next) => {
+    if (await getGuardPause($)) return { deny: 'Limit Guard paused this session near the usage limit; stop here, the work resumes when the limit resets.' }
+    return next(e)
+  })
+
   on('prompt.submit', async ($, e, next) => {
+    // Slash commands still run while paused; the band's Limit Guard button reaches Resume now.
+    if (!e.text.trimStart().startsWith('/') && (await getGuardPause($))) {
+      return { drop: `${fmt.guardStatus(await getGuardPause($), await getGuard($))}. Use Limit Guard → Resume now to go on.` }
+    }
     const isComposer = e.origin.kind === 'composer'
     const ticket = isComposer ? TICKET_RE.exec(e.text)?.[1] : undefined
     if (ticket) await setTicket($, ticket)
@@ -994,6 +1222,7 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, ($, e) => renderPane($, e))
+  on('ui.render', { component: 'Pane', requestId: GUARD_PANE_ID }, ($, e) => renderGuardPane($, e))
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.surface === 'mobile') return next(e)

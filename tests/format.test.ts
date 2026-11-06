@@ -111,3 +111,32 @@ test('status dropdown uses project statuses and keeps the saved one', async () =
   expect(fmt.statusOptions(['To Do'], 'Ready for QA', ['X'])).toEqual(['Ready for QA', 'To Do'])
   expect(fmt.statusOptions([], 'X', ['X', 'Y'])).toEqual(['X', 'Y'])
 })
+
+const guardNow = Date.parse('2026-11-06T10:00:00Z')
+const soon = '2026-11-06T12:00:00Z'
+const later = '2026-11-10T00:00:00Z'
+const config = { isEnabled: true, fiveHour: 95, weekly: 97, onDemandUsd: 0, handoffDir: '' }
+
+test('guard trips on the window past its threshold, ignoring past resets and quieted windows', () => {
+  const limits = [
+    { kind: 'five_hour', percentUsed: 96, resetsAt: soon },
+    { kind: 'seven_day', percentUsed: 50, resetsAt: later },
+    { kind: 'five_hour', percentUsed: 99, resetsAt: '2026-11-06T09:00:00Z' },
+  ]
+  expect(fmt.guardTrip(fmt.watchedLimits(limits, guardNow, null), config)).toEqual({ kind: 'five_hour', resetsAt: soon, reason: '5h 96%' })
+  expect(fmt.guardTrip(fmt.watchedLimits(limits, guardNow, soon), config)).toBeUndefined()
+})
+
+test('guard on-demand budget counts spend from the spill', () => {
+  const [full] = fmt.watchedLimits([{ kind: 'seven_day', percentUsed: 100, resetsAt: later }], guardNow, null)
+  expect(fmt.overBudget(full!, 2, 4, 5)).toBeUndefined()
+  expect(fmt.overBudget(full!, 2, 7.5, 5)?.reason).toBe('$5.50 of on-demand')
+})
+
+test('guard parses inputs and names handoffs', () => {
+  expect(fmt.parseNumber('90%', 95, 100)).toBe(90)
+  expect(fmt.parseNumber('abc', 95, 100)).toBe(95)
+  expect(fmt.parseNumber('150', 95, 100)).toBe(95)
+  expect(fmt.defaultHandoffDir('C:/repo/')).toBe('C:/repo/.claude/handoffs')
+  expect(fmt.handoffFileName('PAY-1', guardNow)).toBe('handoff-PAY-1-2026-11-06-10-00.md')
+})

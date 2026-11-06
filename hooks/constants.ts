@@ -1,8 +1,10 @@
-import type { DevflowConfig } from '../types'
+import type { DevflowConfig, GuardConfig } from '../types'
 
 export const PLUGIN = 'jira-devflow'
 export const PANE_ID = 'devflow'
 export const PANE_TITLE = 'Jira Devflow'
+export const GUARD_PANE_ID = 'limit-guard'
+export const GUARD_PANE_TITLE = 'Limit Guard'
 export const COMMAND = 'devflow'
 
 // Cheap, fast model for commit messages and plan file names.
@@ -41,6 +43,14 @@ export const DEFAULT_CONFIG: DevflowConfig = {
   labels: [],
   updateParts: ['status', 'developedBy', 'labels'],
 }
+
+// handoffDir '' resolves to <repo root>/HANDOFF_SUBDIR at load.
+export const DEFAULT_GUARD: GuardConfig = { isEnabled: true, fiveHour: 95, weekly: 97, onDemandUsd: 0, handoffDir: '' }
+export const HANDOFF_SUBDIR = '.claude/handoffs'
+export const STORE_GUARD_PREFIX = 'guard:'
+export const GUARD_KINDS = { five_hour: '5h', seven_day: 'Weekly' } as const
+// Resume a minute after the reset, so the first request lands in the new window.
+export const GUARD_GRACE_MS = 60_000
 
 // Shown until the ticket's project statuses are fetched.
 export const STATUS_OPTIONS = ['In Progress', 'Code Review', 'Ready for QA', 'Done']
