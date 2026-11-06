@@ -24,6 +24,8 @@ A row above the prompt box, shown in every session:
 
 ## Limit Guard
 
+![Limit Guard panel](docs/screenshots/limit-guard-panel.png)
+
 Stops a long task before it runs into the limit and continues it after the reset, so nothing is lost and no on-demand usage is spent unless you allow it.
 
 **What happens when a threshold is reached**
