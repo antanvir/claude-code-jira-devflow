@@ -43,10 +43,14 @@ export type TurnBaseline = { isComposer: boolean; hashes: Record<string, string>
 // and 'bandExpanded' (the band's cards above the meters; collapsed by default).
 export type PaneSection = 'update' | 'settings' | 'minimized' | 'bandExpanded'
 
-// Limit Guard settings, per repo. onDemandUsd 0 = off; above 0 the % thresholds
-// give way and a spilled window may spend up to that much on-demand.
+// Which limit pauses when an on-demand budget is set: the % thresholds, or the
+// budget (a spilled window may then spend up to onDemandUsd on-demand).
+export type GuardPriority = 'percent' | 'onDemand'
+
+// Limit Guard settings, per repo. onDemandUsd 0 = off, and priority is then moot.
 export type GuardConfig = {
   isEnabled: boolean
+  priority: GuardPriority
   fiveHour: number
   weekly: number
   onDemandUsd: number

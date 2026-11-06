@@ -45,7 +45,18 @@ export const DEFAULT_CONFIG: DevflowConfig = {
 }
 
 // handoffDir '' resolves to <repo root>/HANDOFF_SUBDIR at load.
-export const DEFAULT_GUARD: GuardConfig = { isEnabled: true, fiveHour: 95, weekly: 97, onDemandUsd: 0, handoffDir: '' }
+export const DEFAULT_GUARD: GuardConfig = {
+  isEnabled: true,
+  priority: 'percent',
+  fiveHour: 95,
+  weekly: 97,
+  onDemandUsd: 0,
+  handoffDir: '',
+}
+export const GUARD_PRIORITY_OPTIONS = [
+  { value: 'percent', label: '% limits (no on-demand spend)' },
+  { value: 'onDemand', label: 'On-demand budget' },
+]
 export const HANDOFF_SUBDIR = '.claude/handoffs'
 export const STORE_GUARD_PREFIX = 'guard:'
 export const GUARD_KINDS = { five_hour: '5h', seven_day: 'Weekly' } as const

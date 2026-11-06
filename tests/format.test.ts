@@ -115,7 +115,7 @@ test('status dropdown uses project statuses and keeps the saved one', async () =
 const guardNow = Date.parse('2026-11-06T10:00:00Z')
 const soon = '2026-11-06T12:00:00Z'
 const later = '2026-11-10T00:00:00Z'
-const config = { isEnabled: true, fiveHour: 95, weekly: 97, onDemandUsd: 0, handoffDir: '' }
+const config = { isEnabled: true, fiveHour: 95, weekly: 97, onDemandUsd: 0, handoffDir: '', priority: 'percent' as const }
 
 test('guard trips on the window past its threshold, ignoring past resets and quieted windows', () => {
   const limits = [

@@ -11,6 +11,7 @@ import type {
   GuardConfig,
   GuardField,
   GuardPause,
+  GuardPriority,
   GuardSpend,
   GuardTrip,
   Meter,
@@ -39,6 +40,7 @@ import {
   GROUP_BORDER_HOVER,
   GUARD_PANE_ID,
   GUARD_PANE_TITLE,
+  GUARD_PRIORITY_OPTIONS,
   JIRA_COLOR,
   LEVEL_COLORS,
   MAX_TRANSITION_STEPS,
@@ -286,7 +288,8 @@ async function checkGuard($: EngineInterface, limits: SessionUsage['rateLimits']
   const config = await getGuard($)
   if (!config.isEnabled || isPausing || (await getGuardPause($))) return
   const watched = fmt.watchedLimits(limits, await $.clock.now(), await getGuardQuiet($))
-  const hit = config.onDemandUsd > 0 ? await spendTrip($, watched, costUsd, config.onDemandUsd) : fmt.guardTrip(watched, config)
+  const isBudget = config.onDemandUsd > 0 && config.priority === 'onDemand'
+  const hit = isBudget ? await spendTrip($, watched, costUsd, config.onDemandUsd) : fmt.guardTrip(watched, config)
   // Off this dispatch: the pause aborts the turn and waits on the model.
   if (hit) $.clock.after(0, () => void pauseForLimit($, hit))
 }
@@ -1002,7 +1005,7 @@ async function renderGuardPane($: EngineInterface, e: RenderInput<'Pane'>): Prom
     return <Text>{`Limit Guard · ${status}`}</Text>
   }
   const ui = $.ui.resolve(e)
-  const { Box, Text, Button } = ui
+  const { Box, Text, Button, Select } = ui
   const { action, group, row, field } = paneKit($, ui, await getDrafts($), await getRevs($))
   const now = (m?: Meter) => (m ? ` (now ${m.percent}%)` : '')
 
@@ -1020,11 +1023,21 @@ async function renderGuardPane($: EngineInterface, e: RenderInput<'Pane'>): Prom
         ]),
         pause?.handoffPath ? <Text key="guard-path" dimColor wrap="truncate-start">{`Handoff: ${pause.handoffPath}`}</Text> : null,
         pause && !pause.isWriting ? row('guard-resume', [action('guard-resume-now', 'Resume now', () => resumeGuard($, true), true)]) : null,
+        <Text key="guard-open-note" dimColor>Auto-resume needs Claude Code open at the reset; if it is closed then, nothing resumes on its own.</Text>,
       ].filter(Boolean) as RenderElement[])}
       {group('g-guard-limits', 'THRESHOLDS', [
         field('guardFiveHour', `5-hour limit %${now(usage.fiveHour)}`, String(config.fiveHour), '95', GUARD_HINT),
         field('guardWeekly', `Weekly limit %${now(usage.weekly)}`, String(config.weekly), '97', GUARD_HINT),
-        field('guardOnDemand', 'On-demand budget $ (0 = off; above 0 replaces the % limits)', String(config.onDemandUsd), '0', GUARD_HINT),
+        field('guardOnDemand', 'On-demand budget $ (0 = off)', String(config.onDemandUsd), '0', GUARD_HINT),
+        config.onDemandUsd > 0 ? (
+          <Select
+            key="guard-priority"
+            label="Pause by"
+            options={GUARD_PRIORITY_OPTIONS}
+            value={config.priority}
+            onSelect={value => void saveGuard($, { priority: value as GuardPriority })}
+          />
+        ) : null,
         field('guardDir', 'Handoff directory', config.handoffDir, fmt.defaultHandoffDir('<repo>'), GUARD_HINT),
         row('guard-actions', [
           action('guard-save', 'Save', () => commitDrafts($, GUARD_FIELDS), true),
@@ -1035,7 +1048,7 @@ async function renderGuardPane($: EngineInterface, e: RenderInput<'Pane'>): Prom
             await setRevs($, { ...revs, ...Object.fromEntries(GUARD_FIELDS.map(f => [f, (revs[f] ?? 0) + 1])) })
           }),
         ]),
-      ])}
+      ].filter(Boolean) as RenderElement[])}
       {notice ? (
         <Box key="guard-notice" flexDirection="row" gap={1} alignItems="center">
           <Text color="suggestion">{notice}</Text>
