@@ -35,7 +35,7 @@ Stops a long task before it runs into the limit and continues it after the reset
 3. The session is paused: tool calls are refused, new turns are stopped and typed prompts are held back. Slash commands still work. The ribbon button changes to **Limit Guard ⏸**.
 4. One minute after the limit resets, the handoff doc is sent back to Claude and the work carries on from where it stopped.
 
-**Settings** (saved per repo; defaults are filled into the fields)
+**Settings** (shared by every session, since the limits are account-wide; a change reaches other running sessions on their next usage update. Only the handoff directory is kept per repo or worktree. Defaults are filled into the fields.)
 
 | Setting | Default | Meaning |
 | --- | --- | --- |

@@ -58,6 +58,7 @@ import {
   STATUS_SAMPLE_SIZE,
   STORE_CLOUD_ID,
   STORE_CONFIG,
+  STORE_GUARD,
   STORE_GUARD_PREFIX,
   STORE_REPO_CONFIG_PREFIX,
   STORE_WORKFLOW_PREFIX,
@@ -266,16 +267,24 @@ async function defaultGuard($: EngineInterface): Promise<GuardConfig> {
   return { ...DEFAULT_GUARD, handoffDir: fmt.defaultHandoffDir(root.isOk ? root.text : await $.session.cwd()) }
 }
 
+type SharedGuard = Omit<GuardConfig, 'handoffDir'>
+
+const getSharedGuard = async ($: EngineInterface) =>
+  (await $.store.get(STORE_GUARD)) as Partial<SharedGuard> | undefined
+
 async function loadGuard($: EngineInterface): Promise<GuardConfig> {
-  const saved = (await $.store.get(STORE_GUARD_PREFIX + (await repoConfigKey($)))) as Partial<GuardConfig> | undefined
+  const repo = (await $.store.get(STORE_GUARD_PREFIX + (await repoConfigKey($)))) as Partial<GuardConfig> | undefined
   const defaults = await defaultGuard($)
-  return { ...defaults, ...saved, handoffDir: saved?.handoffDir || defaults.handoffDir }
+  // A repo entry from before the shared key still carries thresholds; it seeds them until the first save.
+  return { ...defaults, ...repo, ...(await getSharedGuard($)), handoffDir: repo?.handoffDir || defaults.handoffDir }
 }
 
 async function saveGuard($: EngineInterface, patch: Partial<GuardConfig>): Promise<void> {
   const next = { ...(await getGuard($)), ...patch }
   await setGuard($, next)
-  await $.store.set(STORE_GUARD_PREFIX + (await repoConfigKey($)), next)
+  const { handoffDir, ...shared } = next
+  await $.store.set(STORE_GUARD, shared)
+  await $.store.set(STORE_GUARD_PREFIX + (await repoConfigKey($)), { handoffDir })
   // The last reading may already be past a lowered threshold; no new one may come.
   await checkGuard($, (await $.session.usage()).rateLimits)
 }
@@ -284,8 +293,16 @@ async function openGuardPane($: EngineInterface): Promise<boolean> {
   return (await $.ui.open({ id: GUARD_PANE_ID, title: GUARD_PANE_TITLE })).isPlaced
 }
 
+// $.store has no change events, so each check picks up thresholds another session saved.
+async function syncGuard($: EngineInterface): Promise<GuardConfig> {
+  const current = await getGuard($)
+  const next = { ...current, ...(await getSharedGuard($)), handoffDir: current.handoffDir }
+  if (JSON.stringify(next) !== JSON.stringify(current)) await setGuard($, next)
+  return next
+}
+
 async function checkGuard($: EngineInterface, limits: SessionUsage['rateLimits'], costUsd?: number): Promise<void> {
-  const config = await getGuard($)
+  const config = await syncGuard($)
   if (!config.isEnabled || isPausing || (await getGuardPause($))) return
   const watched = fmt.watchedLimits(limits, await $.clock.now(), await getGuardQuiet($))
   const isBudget = config.onDemandUsd > 0 && config.priority === 'onDemand'

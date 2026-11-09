@@ -58,6 +58,8 @@ export const GUARD_PRIORITY_OPTIONS = [
   { value: 'onDemand', label: 'On-demand budget' },
 ]
 export const HANDOFF_SUBDIR = '.claude/handoffs'
+// Limits are account-wide, so thresholds share one key; only handoffDir stays per repo root.
+export const STORE_GUARD = 'guard'
 export const STORE_GUARD_PREFIX = 'guard:'
 export const GUARD_KINDS = { five_hour: '5h', seven_day: 'Weekly' } as const
 // Resume a minute after the reset, so the first request lands in the new window.
