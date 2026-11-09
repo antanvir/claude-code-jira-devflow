@@ -771,13 +771,14 @@ function paneKit($: EngineInterface, { Box, Text, Button, Input }: PaneUi, draft
   )
 
   // Value shown = the draft while typing, else the saved one; Save/Enter or Apply commits.
+  // `saved` in the key remounts Input when another session's save syncs in (Input reads value once).
   const field = (key: DraftField, label: string, saved: string, placeholder?: string, hint = JIRA_HINT) => {
     const draft = drafts[key]
     const isDirty = draft !== undefined && draft !== saved
     return (
       <Box key={`field-${key}`} flexDirection="column">
         <Input
-          key={`${key}-${revs[key] ?? 0}`}
+          key={`${key}-${revs[key] ?? 0}-${saved}`}
           label={label}
           placeholder={placeholder}
           value={draft ?? saved}
