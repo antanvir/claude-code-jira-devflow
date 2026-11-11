@@ -56,8 +56,8 @@ function resetLabel(resetsAt?: string): string {
   const ms = Date.parse(resetsAt) - Date.now()
   if (!(ms > 0)) return ''
   const hours = Math.floor(ms / 3_600_000)
-  if (hours >= 24) return `›${Math.floor(hours / 24)}d${hours % 24}h`
-  return `›${hours}h${Math.floor((ms % 3_600_000) / 60_000)}m`
+  if (hours >= 24) return `›\u2009${Math.floor(hours / 24)}d${hours % 24}h`
+  return `›\u2009${hours}h${Math.floor((ms % 3_600_000) / 60_000)}m`
 }
 
 export function toUsageSnapshot(usage: SessionUsage): UsageSnapshot {
