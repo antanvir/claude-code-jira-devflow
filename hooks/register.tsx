@@ -518,7 +518,8 @@ async function requireTicket($: EngineInterface): Promise<{ ticket: string; conf
 async function setDevelopedBy($: EngineInterface, ticket: string, email: string): Promise<Outcome> {
   const id = await cloudId($)
   if (!id) return { isOk: false, text: 'No Atlassian site found' }
-  const issue = await callAtlassian($, 'getJiraIssue', { cloudId: id, issueIdOrKey: ticket, fields: ['summary'], expand: 'editmeta' })
+  // editmeta only lists the requested fields, so ask for all to find the custom one.
+  const issue = await callAtlassian($, 'getJiraIssue', { cloudId: id, issueIdOrKey: ticket, fields: ['*all'], expand: 'editmeta' })
   if (!issue.isOk) return issue
   const field = fmt.parseEditFieldId(issue.text, DEVELOPED_BY_FIELD)
   if (!field) return { isOk: false, text: `${ticket}: no editable "${DEVELOPED_BY_FIELD}" field` }
