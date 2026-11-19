@@ -10,6 +10,9 @@ export type UpdatePart = 'status' | 'developedBy' | 'labels'
 
 export type Meter = { percent: number; label: string; resetsAt?: string }
 
+// Account-wide Usage Credits in dollars.
+export type Credits = { used: number; limit: number }
+
 export type UsageSnapshot = {
   fiveHour?: Meter
   weekly?: Meter
@@ -62,7 +65,8 @@ export type GuardConfig = {
 export type GuardTrip = { kind: string; resetsAt: string; reason: string }
 export type GuardPause = GuardTrip & { pausedAt: number; isWriting: boolean; handoffPath?: string }
 // Session cost when a window first read full; on-demand spend counts from it.
-export type GuardSpend = { resetsAt: string; baseUsd: number }
+// isAccount: baseUsd is the account's used credits, else this session's cost.
+export type GuardSpend = { resetsAt: string; baseUsd: number; isAccount: boolean }
 
 export type GuardField = 'guardFiveHour' | 'guardWeekly' | 'guardOnDemand' | 'guardDir'
 

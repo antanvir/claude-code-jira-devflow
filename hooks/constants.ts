@@ -17,6 +17,14 @@ export const PLAN_FILE_RE = /[\\/]\.claude[\\/]plans[\\/][^\\/]+\.md$/i
 export const EDIT_TOOL_RE = /^(Edit|Write|NotebookEdit)$/
 
 export const USAGE_REFRESH_MS = 30_000
+// Usage Credits come from the account's usage endpoint: polled slowly, retried twice after a failed first read.
+export const CREDITS_URL = 'https://api.anthropic.com/api/oauth/usage'
+export const CREDITS_BETA_HEADER = 'oauth-2025-04-20'
+export const CREDITS_REFRESH_MS = 300_000
+export const CREDITS_RETRY_MS = [15_000, 90_000] as const
+// Unverified: the endpoint reports amounts in cents. The raw dump file shows whether that holds.
+export const CREDITS_UNIT = 100
+export const CREDITS_DUMP_FILE = 'credits-response.json'
 // Bars: green below WARN, orange from WARN, red from DANGER.
 export const WARN_PERCENT = 60
 export const DANGER_PERCENT = 90

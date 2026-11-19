@@ -1,8 +1,9 @@
 // Pure helpers: no `$` here (the engine only follows `$` within register.tsx).
 import type { SessionUsage } from 'claude-code'
 
-import type { DevflowConfig, GuardConfig, GuardPause, GuardTrip, Meter, UsageSnapshot } from '../types'
+import type { Credits, DevflowConfig, GuardConfig, GuardPause, GuardTrip, Meter, UsageSnapshot } from '../types'
 import {
+  CREDITS_UNIT,
   DANGER_PERCENT,
   GLOBAL_CONFIG_FIELDS,
   GUARD_GRACE_MS,
@@ -60,7 +61,20 @@ function resetLabel(resetsAt?: string): string {
   return `›\u2009${hours}h${Math.floor((ms % 3_600_000) / 60_000)}m`
 }
 
-export function toUsageSnapshot(usage: SessionUsage): UsageSnapshot {
+// extra_usage is absent or disabled on plans without Usage Credits.
+export function parseCredits(text: string): Credits | undefined {
+  let extra: Record<string, unknown> | undefined
+  try {
+    extra = (JSON.parse(text) as { extra_usage?: Record<string, unknown> }).extra_usage ?? undefined
+  } catch {
+    return undefined
+  }
+  const { is_enabled: isEnabled, monthly_limit: limit, used_credits: used } = extra ?? {}
+  if (isEnabled === false || typeof limit !== 'number' || !(limit > 0)) return undefined
+  return { used: (typeof used === 'number' ? used : 0) / CREDITS_UNIT, limit: limit / CREDITS_UNIT }
+}
+
+export function toUsageSnapshot(usage: SessionUsage, credits?: Credits): UsageSnapshot {
   const meter = (kind: string): Meter | undefined => {
     const found = usage.rateLimits.find(r => r.kind === kind)
     if (!found) return undefined
@@ -70,7 +84,10 @@ export function toUsageSnapshot(usage: SessionUsage): UsageSnapshot {
   return {
     fiveHour: meter('five_hour'),
     weekly: meter('seven_day'),
-    credits: meter('spend_limit'),
+    credits: credits && {
+      percent: round((credits.used / credits.limit) * 100),
+      label: `${credits.used.toFixed(2)}/${round(credits.limit)}`,
+    },
     context: ctx === undefined ? undefined : { percent: round(ctx), label: `${round(ctx)}%` },
   }
 }

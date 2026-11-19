@@ -127,6 +127,16 @@ test('guard trips on the window past its threshold, ignoring past resets and qui
   expect(fmt.guardTrip(fmt.watchedLimits(limits, guardNow, soon), config)).toBeUndefined()
 })
 
+test('credits parse from extra_usage and show as used/limit', () => {
+  const body = JSON.stringify({ extra_usage: { is_enabled: true, monthly_limit: 15000, used_credits: 2546 } })
+  const credits = fmt.parseCredits(body)
+  expect(credits).toEqual({ used: 25.46, limit: 150 })
+  const snapshot = fmt.toUsageSnapshot({ startedAt: 0, context: { window: 1, percent: 0 }, rateLimits: [] }, credits)
+  expect(snapshot.credits?.label).toBe('25.46/150')
+  expect(fmt.parseCredits('{}')).toBe(undefined)
+  expect(fmt.parseCredits(JSON.stringify({ extra_usage: { is_enabled: false, monthly_limit: 1 } }))).toBe(undefined)
+})
+
 test('guard on-demand budget counts spend from the spill', () => {
   const [full] = fmt.watchedLimits([{ kind: 'seven_day', percentUsed: 100, resetsAt: later }], guardNow, null)
   expect(fmt.overBudget(full!, 2, 4, 5)).toBeUndefined()

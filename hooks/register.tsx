@@ -4,6 +4,7 @@ import type { Elements, EngineInterface, Register, RenderElement, RenderInput, S
 
 import type {
   CommitCard,
+  Credits,
   DevflowConfig,
   DraftField,
   Drafts,
@@ -34,6 +35,11 @@ import {
   BAND_NARROW_COLUMNS,
   BAR_CELLS,
   BAR_CELLS_NARROW,
+  CREDITS_BETA_HEADER,
+  CREDITS_DUMP_FILE,
+  CREDITS_REFRESH_MS,
+  CREDITS_RETRY_MS,
+  CREDITS_URL,
   EDIT_TOOL_RE,
   GIT_TIMEOUT_MS,
   GROUP_BORDER,
@@ -238,9 +244,39 @@ async function loadConfig($: EngineInterface): Promise<DevflowConfig> {
   return { ...DEFAULT_CONFIG, ...(repo ? fmt.splitConfig(repo).repo : global), ...user }
 }
 
+// Account-wide Usage Credits; stays undefined on plans without that tier.
+let credits: Credits | undefined
+let isCreditsDumped = false
+
 async function refreshUsage($: EngineInterface): Promise<void> {
   const usage = await $.session.usage()
-  await setUsage($, fmt.toUsageSnapshot(usage))
+  await setUsage($, fmt.toUsageSnapshot(usage, credits))
+}
+
+// Resolves true when the request succeeded, even if the plan has no credits.
+async function fetchCredits($: EngineInterface): Promise<boolean> {
+  const auth = await $.session.authorize()
+  if (!auth) return false
+  const res = await $.http
+    .fetch(CREDITS_URL, { auth: auth.handle, headers: { 'anthropic-beta': CREDITS_BETA_HEADER } })
+    .catch(() => undefined)
+  if (!res?.ok) return false
+  // Raw response of the first success per session, to check the endpoint's field names and units.
+  if (!isCreditsDumped) {
+    isCreditsDumped = true
+    const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME')) ?? ''
+    await $.fs.write(`${home}/.claude/limit-guard/${CREDITS_DUMP_FILE}`, res.text).catch(() => undefined)
+  }
+  credits = fmt.parseCredits(res.text)
+  await refreshUsage($)
+  return true
+}
+
+// First read at session start; a failure retries after each CREDITS_RETRY_MS delay.
+async function loadCredits($: EngineInterface, attempt = 0): Promise<void> {
+  if (await fetchCredits($)) return
+  const delay = CREDITS_RETRY_MS[attempt]
+  if (delay !== undefined) $.clock.after(delay, () => void loadCredits($, attempt + 1))
 }
 
 // Compact button disabled for now; kept for re-enabling.
@@ -318,13 +354,18 @@ async function spendTrip(
   budgetUsd: number,
 ): Promise<GuardTrip | undefined> {
   const full = fmt.spilledLimit(watched)
-  if (!full || costUsd === undefined) return undefined
+  if (!full) return undefined
+  // Account-wide credits when the plan reports them; this session's cost otherwise.
+  await fetchCredits($)
+  const isAccount = credits !== undefined
+  const nowUsd = credits ? credits.used : costUsd
+  if (nowUsd === undefined) return undefined
   let spend = await getGuardSpend($)
-  if (spend?.resetsAt !== full.resetsAt) {
-    spend = { resetsAt: full.resetsAt, baseUsd: costUsd }
+  if (spend?.resetsAt !== full.resetsAt || spend.isAccount !== isAccount) {
+    spend = { resetsAt: full.resetsAt, baseUsd: nowUsd, isAccount }
     await setGuardSpend($, spend)
   }
-  return fmt.overBudget(full, spend.baseUsd, costUsd, budgetUsd)
+  return fmt.overBudget(full, spend.baseUsd, nowUsd, budgetUsd)
 }
 
 async function pauseForLimit($: EngineInterface, trip: GuardTrip): Promise<void> {
@@ -1111,11 +1152,11 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
     <Box key="band-meters" flexDirection="row" flexWrap="wrap" columnGap={isNarrow ? 2 : 3} alignItems="center">
       {meter('5h', usage.fiveHour)}
       {meter('Weekly', usage.weekly)}
-      {usage.credits ? meter('Credits', usage.credits) : null}
+      {usage.credits ? meter('Credits$', usage.credits) : null}
       {meter('Context', usage.context)}
       <Box flexDirection="row" gap={0}>
         {/* {action('band-compact', isNarrow ? COMPACT_ICON : 'Compact', () => compact($))} */}
-        <Button key="band-refresh" label="↻" plain dimColor onPress={() => void refreshUsage($)} />
+        <Button key="band-refresh" label="↻" plain dimColor onPress={() => void fetchCredits($).then(() => refreshUsage($))} />
         {hasCards ? (
           <Button
             key="band-cards-toggle"
@@ -1165,6 +1206,8 @@ export const register: Register = on => {
       void guardTick($)
     })
     void refreshUsage($)
+    void loadCredits($)
+    $.clock.every(CREDITS_REFRESH_MS, () => void fetchCredits($))
     // The pane stays hidden until "Open More Settings"; only the band shows by default.
     return next(e)
   })
