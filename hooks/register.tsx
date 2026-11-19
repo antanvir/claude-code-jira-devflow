@@ -1132,16 +1132,23 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
   const action = (key: string, label: string, onPress: () => Promise<unknown>, isPrimary = false) => (
     <Button key={key} label={label} variant={isPrimary ? 'primary' : 'secondary'} onPress={() => void onPress()} />
   )
-  const meter = (name: string, m?: Meter) => (
-    <Box key={`meter-${name}`} flexDirection="row" gap={1}>
-      <Text dimColor>{name}</Text>
-      {m ? (
-        <Text color={LEVEL_COLORS[fmt.levelColor(m.percent)]}>{`${fmt.bar(m.percent, barCells)} ${m.label}`}</Text>
-      ) : (
-        <Text dimColor>n/a</Text>
-      )}
-    </Box>
-  )
+  // The reset time or credit cap trails the value, so it is split off and dimmed.
+  const meter = (name: string, m?: Meter) => {
+    const [, value = '', extra = ''] = m?.label.match(/^([^\s/]*)(.*)$/) ?? []
+    return (
+      <Box key={`meter-${name}`} flexDirection="row" gap={1}>
+        <Text dimColor>{name}</Text>
+        {m ? (
+          <Box flexDirection="row">
+            <Text color={LEVEL_COLORS[fmt.levelColor(m.percent)]}>{`${fmt.bar(m.percent, barCells)} ${value}`}</Text>
+            {extra ? <Text color={LEVEL_COLORS[fmt.levelColor(m.percent)]} dimColor>{extra}</Text> : null}
+          </Box>
+        ) : (
+          <Text dimColor>n/a</Text>
+        )}
+      </Box>
+    )
+  }
   const meters = (
     <Box key="band-meters" flexDirection="row" flexWrap="wrap" columnGap={isNarrow || usage.credits ? 2 : 3} alignItems="center">
       {meter('5h', usage.fiveHour)}
