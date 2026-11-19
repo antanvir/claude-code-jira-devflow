@@ -1133,7 +1133,8 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
   const isCollapsed = !open.includes('bandExpanded')
   const { Box, Text, Button } = $.ui.resolve(e)
   const isNarrow = (e.viewport?.columns ?? Infinity) < BAND_NARROW_COLUMNS
-  const barCells = isNarrow ? BAR_CELLS_NARROW : BAR_CELLS
+  // Four meters need shorter bars and tighter columns to stay on one line.
+  const barCells = isNarrow || usage.credits ? BAR_CELLS_NARROW : BAR_CELLS
 
   const action = (key: string, label: string, onPress: () => Promise<unknown>, isPrimary = false) => (
     <Button key={key} label={label} variant={isPrimary ? 'primary' : 'secondary'} onPress={() => void onPress()} />
@@ -1149,12 +1150,12 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
     </Box>
   )
   const meters = (
-    <Box key="band-meters" flexDirection="row" flexWrap="wrap" columnGap={isNarrow ? 2 : 3} alignItems="center">
+    <Box key="band-meters" flexDirection="row" flexWrap="wrap" columnGap={isNarrow || usage.credits ? 2 : 3} alignItems="center">
       {meter('5h', usage.fiveHour)}
       {meter('Weekly', usage.weekly)}
       {usage.credits ? meter('Credits$', usage.credits) : null}
       {meter('Context', usage.context)}
-      <Box flexDirection="row" gap={0}>
+      <Box flexDirection="row" gap={1}>
         {/* {action('band-compact', isNarrow ? COMPACT_ICON : 'Compact', () => compact($))} */}
         <Button key="band-refresh" label="↻" plain dimColor onPress={() => void fetchCredits($).then(() => refreshUsage($))} />
         {hasCards ? (
