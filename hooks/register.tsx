@@ -34,6 +34,7 @@ import {
   DEFAULT_GUARD,
   BAND_NARROW_COLUMNS,
   BAR_CELLS,
+  BAR_CELLS_CREDITS,
   BAR_CELLS_NARROW,
   CREDITS_BETA_HEADER,
   CREDITS_REFRESH_MS,
@@ -1125,8 +1126,8 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
   const isCollapsed = !open.includes('bandExpanded')
   const { Box, Text, Button } = $.ui.resolve(e)
   const isNarrow = (e.viewport?.columns ?? Infinity) < BAND_NARROW_COLUMNS
-  // Four meters need shorter bars and tighter columns to stay on one line.
-  const barCells = isNarrow || usage.credits ? BAR_CELLS_NARROW : BAR_CELLS
+  // Four meters plus the buttons need 3-cell bars to stay on one line.
+  const barCells = usage.credits ? BAR_CELLS_CREDITS : isNarrow ? BAR_CELLS_NARROW : BAR_CELLS
 
   const action = (key: string, label: string, onPress: () => Promise<unknown>, isPrimary = false) => (
     <Button key={key} label={label} variant={isPrimary ? 'primary' : 'secondary'} onPress={() => void onPress()} />

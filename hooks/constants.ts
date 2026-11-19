@@ -90,6 +90,7 @@ export const BAR_CELLS = 6
 // Below this many columns the band uses short bars.
 export const BAND_NARROW_COLUMNS = 72
 export const BAR_CELLS_NARROW = 4
+export const BAR_CELLS_CREDITS = 3
 // export const COMPACT_ICON = '⇲' // Compact button disabled for now.
 // Pane head and band cards toggle; both sit above the prompt and grow upward,
 // so up caret expands, down caret minimizes.
