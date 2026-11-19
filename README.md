@@ -13,6 +13,7 @@ A Claude Code mod that helps you stay within your usage limits. It shows your li
 ## Usage ribbon
 
 ![Ribbon with usage meters](docs/screenshots/band-usage-meters.png)
+n![Ribbon with the Credits$ meter](docs/screenshots/band-usage-meters-credits.png)
 
 A row above the prompt box, shown in every session:
 
