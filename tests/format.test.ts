@@ -130,7 +130,7 @@ test('guard trips on the window past its threshold, ignoring past resets and qui
 test('guard on-demand budget counts spend from the spill', () => {
   const [full] = fmt.watchedLimits([{ kind: 'seven_day', percentUsed: 100, resetsAt: later }], guardNow, null)
   expect(fmt.overBudget(full!, 2, 4, 5)).toBeUndefined()
-  expect(fmt.overBudget(full!, 2, 7.5, 5)?.reason).toBe('$5.50 of on-demand')
+  expect(fmt.overBudget(full!, 2, 7.5, 5)?.reason).toBe('$5.50 of Usage Credits')
 })
 
 test('guard parses inputs and names handoffs', () => {

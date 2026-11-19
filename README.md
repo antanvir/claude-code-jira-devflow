@@ -7,7 +7,7 @@ A Claude Code mod that helps you stay within your usage limits. It shows your li
 | Feature | Where | What it does |
 | --- | --- | --- |
 | **Usage ribbon** | Above the prompt box, always | Live 5-hour, weekly and context meters, colour-coded by how close you are to the limit, with the time until each resets. |
-| **Limit Guard** | **Limit Guard** button on the ribbon | Pauses Claude at a threshold you set (5-hour, weekly or an on-demand budget), saves a handoff doc, and resumes from it after the limit resets. |
+| **Limit Guard** | **Limit Guard** button on the ribbon | Pauses Claude at a threshold you set (5-hour, weekly or a Usage Credits budget), saves a handoff doc, and resumes from it after the limit resets. |
 | **Dev settings panel** | **Open More Settings** on the ribbon, or `/devflow` | Optional Jira and git shortcuts: update a ticket, write acceptance criteria, save plans, commit messages, AI review. |
 
 ## Usage ribbon
@@ -26,7 +26,7 @@ A row above the prompt box, shown in every session:
 
 ![Limit Guard panel](docs/screenshots/limit-guard-panel.png)
 
-Stops a long task before it runs into the limit and continues it after the reset, so nothing is lost and no on-demand usage is spent unless you allow it.
+Stops a long task before it runs into the limit and continues it after the reset, so nothing is lost and no Usage Credits are spent unless you allow it.
 
 **What happens when a threshold is reached**
 
@@ -42,8 +42,8 @@ Stops a long task before it runs into the limit and continues it after the reset
 | Guard on | On | Turns the guard on or off. |
 | 5-hour limit % | 95 | Pause when the 5-hour window reaches this. |
 | Weekly limit % | 97 | Pause when the weekly window reaches this. |
-| On-demand budget $ | 0 (off) | How much on-demand usage Claude may spend after a limit is fully used. |
-| Pause by | % limits | Shown when the budget is above $0. **% limits**: the thresholds above pause Claude and nothing is spent on-demand. **On-demand budget**: Claude can go past 100% and pauses once it has spent the budget. |
+| Usage Credits budget $ | 0 (off) | How much Usage Credits Claude may spend after a limit is fully used. |
+| Pause by | % limits | Shown when the budget is above $0. **% limits**: the thresholds above pause Claude and nothing is spent from Usage Credits. **Usage Credits budget**: Claude can go past 100% and pauses once it has spent the budget. |
 | Handoff directory | `<repo>/.claude/handoffs` | Where handoff docs are saved. Created when needed. |
 
 **Buttons:** **Save**, **Reset to defaults**, and **Resume now** while paused. Resume now continues straight away and stops checking that limit until it resets.

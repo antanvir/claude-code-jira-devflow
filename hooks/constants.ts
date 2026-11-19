@@ -54,8 +54,8 @@ export const DEFAULT_GUARD: GuardConfig = {
   handoffDir: '',
 }
 export const GUARD_PRIORITY_OPTIONS = [
-  { value: 'percent', label: '% limits (no on-demand spend)' },
-  { value: 'onDemand', label: 'On-demand budget' },
+  { value: 'percent', label: '% limits (no Usage Credits spend)' },
+  { value: 'onDemand', label: 'Usage Credits budget' },
 ]
 export const HANDOFF_SUBDIR = '.claude/handoffs'
 // Limits are account-wide, so thresholds share one key; only handoffDir stays per repo root.

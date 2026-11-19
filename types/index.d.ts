@@ -13,6 +13,8 @@ export type Meter = { percent: number; label: string; resetsAt?: string }
 export type UsageSnapshot = {
   fiveHour?: Meter
   weekly?: Meter
+  // Only plans with a Usage Credits tier report it.
+  credits?: Meter
   context?: Meter
 }
 

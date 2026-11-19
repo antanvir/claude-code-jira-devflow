@@ -1047,7 +1047,7 @@ async function renderGuardPane($: EngineInterface, e: RenderInput<'Pane'>): Prom
       {group('g-guard-limits', 'THRESHOLDS', [
         field('guardFiveHour', `5-hour limit %${now(usage.fiveHour)}`, String(config.fiveHour), '95', GUARD_HINT),
         field('guardWeekly', `Weekly limit %${now(usage.weekly)}`, String(config.weekly), '97', GUARD_HINT),
-        field('guardOnDemand', 'On-demand budget $ (0 = off)', String(config.onDemandUsd), '0', GUARD_HINT),
+        field('guardOnDemand', 'Usage Credits budget $ (0 = off)', String(config.onDemandUsd), '0', GUARD_HINT),
         config.onDemandUsd > 0 ? (
           <Select
             key="guard-priority"
@@ -1111,8 +1111,9 @@ async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
     <Box key="band-meters" flexDirection="row" flexWrap="wrap" columnGap={isNarrow ? 2 : 3} alignItems="center">
       {meter('5h', usage.fiveHour)}
       {meter('Weekly', usage.weekly)}
+      {usage.credits ? meter('Credits', usage.credits) : null}
       {meter('Context', usage.context)}
-      <Box flexDirection="row" gap={1}>
+      <Box flexDirection="row" gap={0}>
         {/* {action('band-compact', isNarrow ? COMPACT_ICON : 'Compact', () => compact($))} */}
         <Button key="band-refresh" label="↻" plain dimColor onPress={() => void refreshUsage($)} />
         {hasCards ? (

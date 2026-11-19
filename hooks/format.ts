@@ -70,6 +70,7 @@ export function toUsageSnapshot(usage: SessionUsage): UsageSnapshot {
   return {
     fiveHour: meter('five_hour'),
     weekly: meter('seven_day'),
+    credits: meter('spend_limit'),
     context: ctx === undefined ? undefined : { percent: round(ctx), label: `${round(ctx)}%` },
   }
 }
@@ -400,7 +401,7 @@ export const spilledLimit = (limits: Watched[]) => latest(limits.filter(l => l.p
 export function overBudget(full: Watched, baseUsd: number, costUsd: number, budgetUsd: number): GuardTrip | undefined {
   const spent = costUsd - baseUsd
   if (spent < budgetUsd) return undefined
-  return { kind: full.kind, resetsAt: full.resetsAt, reason: `$${spent.toFixed(2)} of on-demand` }
+  return { kind: full.kind, resetsAt: full.resetsAt, reason: `$${spent.toFixed(2)} of Usage Credits` }
 }
 
 export const guardResumesAt = (pause: GuardPause) => Date.parse(pause.resetsAt) + GUARD_GRACE_MS
