@@ -36,7 +36,6 @@ import {
   BAR_CELLS,
   BAR_CELLS_NARROW,
   CREDITS_BETA_HEADER,
-  CREDITS_DUMP_FILE,
   CREDITS_REFRESH_MS,
   CREDITS_RETRY_MS,
   CREDITS_URL,
@@ -246,7 +245,6 @@ async function loadConfig($: EngineInterface): Promise<DevflowConfig> {
 
 // Account-wide Usage Credits; stays undefined on plans without that tier.
 let credits: Credits | undefined
-let isCreditsDumped = false
 
 async function refreshUsage($: EngineInterface): Promise<void> {
   const usage = await $.session.usage()
@@ -261,12 +259,6 @@ async function fetchCredits($: EngineInterface): Promise<boolean> {
     .fetch(CREDITS_URL, { auth: auth.handle, headers: { 'anthropic-beta': CREDITS_BETA_HEADER } })
     .catch(() => undefined)
   if (!res?.ok) return false
-  // Raw response of the first success per session, to check the endpoint's field names and units.
-  if (!isCreditsDumped) {
-    isCreditsDumped = true
-    const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME')) ?? ''
-    await $.fs.write(`${home}/.claude/limit-guard/${CREDITS_DUMP_FILE}`, res.text).catch(() => undefined)
-  }
   credits = fmt.parseCredits(res.text)
   await refreshUsage($)
   return true

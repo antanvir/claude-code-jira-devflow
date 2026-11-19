@@ -128,7 +128,7 @@ test('guard trips on the window past its threshold, ignoring past resets and qui
 })
 
 test('credits parse from extra_usage and show as used/limit', () => {
-  const body = JSON.stringify({ extra_usage: { is_enabled: true, monthly_limit: 15000, used_credits: 2546 } })
+  const body = JSON.stringify({ extra_usage: { is_enabled: true, monthly_limit: 15000, used_credits: 2546, decimal_places: 2 } })
   const credits = fmt.parseCredits(body)
   expect(credits).toEqual({ used: 25.46, limit: 150 })
   const snapshot = fmt.toUsageSnapshot({ startedAt: 0, context: { window: 1, percent: 0 }, rateLimits: [] }, credits)

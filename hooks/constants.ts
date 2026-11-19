@@ -22,9 +22,8 @@ export const CREDITS_URL = 'https://api.anthropic.com/api/oauth/usage'
 export const CREDITS_BETA_HEADER = 'oauth-2025-04-20'
 export const CREDITS_REFRESH_MS = 300_000
 export const CREDITS_RETRY_MS = [15_000, 90_000] as const
-// Unverified: the endpoint reports amounts in cents. The raw dump file shows whether that holds.
-export const CREDITS_UNIT = 100
-export const CREDITS_DUMP_FILE = 'credits-response.json'
+// Amounts come in minor units; the response's decimal_places says how many (cents when absent).
+export const CREDITS_DEFAULT_DECIMALS = 2
 // Bars: green below WARN, orange from WARN, red from DANGER.
 export const WARN_PERCENT = 60
 export const DANGER_PERCENT = 90

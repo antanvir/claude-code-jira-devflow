@@ -3,7 +3,7 @@ import type { SessionUsage } from 'claude-code'
 
 import type { Credits, DevflowConfig, GuardConfig, GuardPause, GuardTrip, Meter, UsageSnapshot } from '../types'
 import {
-  CREDITS_UNIT,
+  CREDITS_DEFAULT_DECIMALS,
   DANGER_PERCENT,
   GLOBAL_CONFIG_FIELDS,
   GUARD_GRACE_MS,
@@ -69,9 +69,10 @@ export function parseCredits(text: string): Credits | undefined {
   } catch {
     return undefined
   }
-  const { is_enabled: isEnabled, monthly_limit: limit, used_credits: used } = extra ?? {}
+  const { is_enabled: isEnabled, monthly_limit: limit, used_credits: used, decimal_places: decimals } = extra ?? {}
   if (isEnabled === false || typeof limit !== 'number' || !(limit > 0)) return undefined
-  return { used: (typeof used === 'number' ? used : 0) / CREDITS_UNIT, limit: limit / CREDITS_UNIT }
+  const unit = 10 ** (typeof decimals === 'number' ? decimals : CREDITS_DEFAULT_DECIMALS)
+  return { used: (typeof used === 'number' ? used : 0) / unit, limit: limit / unit }
 }
 
 export function toUsageSnapshot(usage: SessionUsage, credits?: Credits): UsageSnapshot {
